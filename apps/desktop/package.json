@@ -13,9 +13,13 @@
     "build:toolchain": "scripts/build-toolchain.sh",
     "tauri": "tauri",
     "app": "npm run build:engine && RUSTFLAGS=\"--remap-path-prefix=$HOME=~\" tauri build --bundles app && node scripts/check-bundle.mjs",
+    "release:mac": "scripts/release-mac.sh",
+    "verify:release": "node scripts/check-bundle.mjs --level release --dmg build/release/MP4-to-IFO-$npm_package_version-arm64.dmg --metadata build/release/release.json",
+    "licenses": "node scripts/license-inventory.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p engine/tsconfig.json",
     "build": "npm run build:ui",
-    "test": "vitest run && node --conditions=development --test --test-concurrency=1 \"test/engine/*.test.ts\""
+    "test": "vitest run && node --conditions=development --test --test-concurrency=1 \"test/engine/*.test.ts\"",
+    "test:rust": "cd src-tauri && cargo test --locked"
   },
   "dependencies": {
     "@mp4-to-ifo/core": "0.1.0",

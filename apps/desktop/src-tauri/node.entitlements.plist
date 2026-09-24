@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- The bundled Node.js (V8) needs JIT under the hardened runtime. -->
+	<!-- Only for the bundled node (V8 JIT). Measured under the hardened runtime: without it node hangs at
+	     startup; with it alone the conversion runs. The app binary and the other tools get no entitlements.
+	     See docs/release.md. -->
 	<key>com.apple.security.cs.allow-jit</key>
-	<true/>
-	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
 	<true/>
 </dict>
 </plist>

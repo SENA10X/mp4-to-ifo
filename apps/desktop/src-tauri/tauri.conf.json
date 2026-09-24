@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": ["app"],
     "category": "public.app-category.video",
     "copyright": "© 2026 SENA",
     "shortDescription": "Create DVD-Video files from an MP4",
@@ -38,13 +38,13 @@
       "engine/": "engine/",
       "../../../third-party/licenses/": "licenses/",
       "../../../third-party/build-info/": "build-info/",
+      "../../../third-party/sources.json": "build-info/sources.json",
       "../../../third-party/README.md": "licenses/THIRD-PARTY.md",
       "../../../LICENSE": "licenses/MP4-to-IFO-MIT.txt"
     },
     "macOS": {
       "minimumSystemVersion": "14.0",
-      "hardenedRuntime": true,
-      "entitlements": "entitlements.plist"
+      "hardenedRuntime": true
     }
   }
 }

@@ -14,6 +14,9 @@
   "scripts": {
     "typecheck": "npm run typecheck --workspaces",
     "build": "npm run build --workspaces",
-    "test": "npm test --workspaces"
+    "test": "npm test --workspaces",
+    "release:mac": "npm run release:mac -w @mp4-to-ifo/desktop",
+    "verify:release": "npm run verify:release -w @mp4-to-ifo/desktop",
+    "test:regression": "test -d samples || { echo 'Heavy media regression needs the local samples/ folder (about 11 GB, not in git).' >&2; exit 1; }; npm run test:regression -w @mp4-to-ifo/core"
   }
 }
