@@ -6,7 +6,7 @@ It is made for the common request "please bring your movie as a DVD / IFO file":
 
 ## Status
 
-Pre-release (0.x). The conversion core, the command-line tool and the Mac app work. The Mac app is built locally only (not signed or notarized yet), and nothing is published to npm yet.
+Pre-release (0.x). The conversion core, the command-line tool and the Mac app work. No release has been published yet: the Mac app's signed and notarized release build is prepared ([docs/release.md](docs/release.md)) but not distributed, and nothing is published to npm.
 
 **Not physically verified.** The output passes software verification (DVD structure, streams, full decode, picture and sound timing against the source, sampled checks that the motion reaches the interlaced fields, ZIP and ISO checks), but it has not been tested on physical DVD players. Always test the burned disc on a DVD player before submitting it. Checks that a particular video gives nothing to measure (a still picture, silence) are reported as not measured, not as passed.
 
@@ -95,8 +95,9 @@ Tests prefer an LGPL-only FFmpeg build (the configuration planned for distributi
 - `packages/core` — conversion core — [docs/core.md](docs/core.md)
 - `packages/cli` — the `mp4-to-ifo` command — [docs/cli.md](docs/cli.md)
 - `apps/desktop` — the Mac app (Tauri 2) — [docs/desktop.md](docs/desktop.md). Build with `npm run build:toolchain -w @mp4-to-ifo/desktop` (once) and `npm run app -w @mp4-to-ifo/desktop`; requires Rust.
+- Release build (signed, notarized DMG): `npm run release:mac` — [docs/release.md](docs/release.md). Heavy media regression (local `samples/`, not in git, not part of `npm test` or CI): `npm run test:regression`.
 - `scripts/poc-convert.mjs` — Phase 2 proof of concept, kept as a reference — [docs/poc.md](docs/poc.md)
 
 ## License
 
-MIT for the code in this repository. FFmpeg, dvdauthor and mkisofs are separate projects under their own licenses; see [docs/poc.md](docs/poc.md#13-license-findings). The Mac app bundles FFmpeg (LGPL-2.1-or-later), zimg (WTFPL), dvdauthor (GPL-2.0-or-later) and Node.js (MIT) as separate programs; see [third-party/README.md](third-party/README.md).
+MIT for the code in this repository. The MIT license does not cover third-party software: FFmpeg, dvdauthor and mkisofs are separate projects under their own licenses; see [docs/poc.md](docs/poc.md#13-license-findings). The Mac app bundles FFmpeg (LGPL-2.1-or-later), zimg (WTFPL), dvdauthor (GPL-2.0-or-later) and Node.js (MIT) as separate programs, plus npm packages and Rust crates under their own licenses; see [third-party/README.md](third-party/README.md). Each release publishes the corresponding source of the bundled FFmpeg, zimg and dvdauthor.

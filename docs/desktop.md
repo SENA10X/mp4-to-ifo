@@ -33,7 +33,9 @@ apps/desktop/
 ├── scripts/
 │   ├── build-toolchain.sh   同梱ツールのビルド（§2）
 │   ├── build-engine.mjs     Core をビルドし、engine.js と Core の dist を src-tauri/engine へ
-│   └── check-bundle.mjs     .app の中身の確認（必要なファイル、ホームのパスが含まれないこと）
+│   ├── check-bundle.mjs     .app / DMG の検証（中身、Mach-O、版、ツール、ライセンス、プライバシー、署名、公証）
+│   ├── release-mac.sh       配布用ビルド（署名・公証・DMG、docs/release.md）
+│   └── license-inventory.mjs npm / Rust の依存のライセンス一覧（third-party/）
 └── test/
     ├── ui/                  vitest（flow、画面、i18n、文言、CSS）
     └── engine/              同梱ツールだけで engine を実行（Homebrew なしの PATH）
@@ -135,14 +137,29 @@ engine は自分のプロセスグループで動く（`process_group(0)`）。f
 - Plan: 入力（解像度、長さ、fps / 可変、音声）、DVD 出力（NTSC 16:9、720×480、フレームレート戦略、音声）、推定サイズ、出力先。警告は「注意」、エラーは「変換できません」として別の見た目で表示し、エラーがあると「変換」は無効。
 - 出力先: 既定は入力と同じフォルダ。「変更…」でフォルダを選ぶと Core がプランを作り直し、名前（`name`、`name-2`…）も Core が決める。
 - Converting: フェーズ、バー、%、処理済みのメディア時間、キャンセル。残り時間は出さない。
-- Complete: 「ソフトウェアによる検証に合格しました」、ファイル一覧、「出力フォルダを開く」（押したときだけ）、DVD プレーヤーで確認する旨、「別の MP4 を変換」。「DVD の焼き方」は `config.burnGuideUrl` が設定されたときだけ表示（現在 null）。
+- Complete: 「ソフトウェアによる検証に合格しました」、ファイル一覧、「出力フォルダを開く」（押したときだけ。開けなければ「出力フォルダを開けませんでした。」を表示、OS のエラー文は出さない）、DVD プレーヤーで確認する旨、「別の MP4 を変換」。「DVD の焼き方」は `config.burnGuideUrl` が設定されたときだけ表示（現在 null）。
 - Failed: 平易な一文。「エラーの詳細をコピー」は伏せ字済みレポート（JSON）をクリップボードへ。「問題を報告」は `config.reportIssueUrl` があるときだけ（現在 null）。送信はしない。
 - 言語: English / 日本語。既定は macOS の言語の先頭が日本語なら日本語、それ以外は English。Settings で変更すると即時に反映し、`localStorage`（`mp4-to-ifo.language`）に保存。macOS のメニューは English のみ。
 - 見た目: SENA の方針（中立色、細い線、名前・ボタン・値は等幅、カード・影・グラデーションなし、角丸 4px 以下）。背景 `#f4f1ea`、ダークモードは macOS に従う（`prefers-color-scheme`）。ウィンドウは 720×560 固定。
 - アクセシビリティ: すべてボタン・ラベル付き、`:focus-visible`、進捗は `role="progressbar"` とテキスト、ドロップの代わりにファイル選択。
 - 通知: 完了と失敗（キャンセルは除く）を、ウィンドウが前面にないときだけ。音なし。
 - スリープ防止: Core の `caffeinate -i -w <pid>`（システムスリープのみ、ディスプレイは対象外）。終了で解除。
-- Settings: 言語、バージョン、「アップデートを確認」（この開発版では利用できない旨を表示）、オープンソースライセンス（同梱の全ライセンス文）。
+- Settings: 言語、バージョン、「アップデートを確認」（このビルドでは利用できない旨を表示）、オープンソースライセンス（同梱の全ライセンス文）。
+
+### Open Output Folder（Phase 6）
+
+WebView には、ファイルやフォルダを開く権限も URL を開く権限もない（`capabilities/default.json` に `opener:*` なし）。
+
+```text
+engine "done" (Core が検証後に確定した outputDir)
+  → Rust: 変換を始めたときの出力フォルダの直下にある実在のフォルダ（シンボリックリンク・".." は不可）なら保持
+  → UI: open_output_folder()（引数なし）→ Rust が保持したフォルダだけを Finder で開く
+```
+
+- 変換を始めるたびに保持をクリアする。検証に通らなかった変換・キャンセルでは何も保持しない。
+- 失敗（保持なし、フォルダが消えた、Finder が開けない）は完了画面に「出力フォルダを開けませんでした。」。
+- URL: `config.ts` の URL（現在すべて null）を有効にするときは、その URL だけを許す `opener:allow-open-url` の scope を capabilities に追加する。UI テストが両者の一致を確認する。
+- テスト: Rust の unit test（`npm run test:rust`、保持してよいフォルダの判定）、UI テスト（引数なしの呼び出し、失敗の表示、capabilities）。
 
 ---
 
@@ -173,16 +190,9 @@ engine は自分のプロセスグループで動く（`process_group(0)`）。f
 
 ---
 
-## 6. Signing / notarization（調査、Phase 6 で実施）
+## 6. Signing / notarization / DMG
 
-現在の .app は ad-hoc（リンカー署名）のみ。ローカルでビルドしたものは quarantine がないので起動できるが、ダウンロードしたものは Gatekeeper に止められる。
-
-- 署名: `APPLE_SIGNING_IDENTITY`（または `bundle.macOS.signingIdentity`）に Developer ID Application を指定すると、`tauri build` がアプリと `externalBin`（node、ffmpeg、ffprobe、dvdauthor）に署名する。Hardened Runtime は `bundle.macOS.hardenedRuntime: true`（設定済み）。
-- Entitlements（`src-tauri/entitlements.plist`）: V8（node）の JIT に `com.apple.security.cs.allow-jit` と `allow-unsigned-executable-memory`。node の公式署名は `allow-jit`、`allow-unsigned-executable-memory`、`disable-executable-page-protection`、`disable-library-validation`、`allow-dyld-environment-variables`、`get-task-allow` を持つ。再署名したときに node に適用される entitlements と、そのうえで node が動くことを確認する（`get-task-allow` は公証で不可）。
-- 公証: `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH`（または `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`）を設定すると `tauri build` が公証と staple を行う。入れ子の実行ファイルはすべて Developer ID・Hardened Runtime・secure timestamp が必要。
-- App Sandbox は使わない（同梱の実行ファイルを子プロセスとして起動し、ユーザーが選んだ場所に書き込むため。Mac App Store は対象外）。
-- 確認手順: `codesign --verify --deep --strict`、`spctl -a -vv`、公証後に quarantine を付けた状態での初回起動。
-- Updater（`tauri-plugin-updater`）は未導入。署名鍵とエンドポイントは Phase 6 で決める。UI は `config.updatesEnabled` で「利用できない」旨を出すだけで、偽のエンドポイントや鍵は置いていない。
+Phase 6 で `scripts/release-mac.sh`（`npm run release:mac`）に移した。`tauri build` は署名しない（署名は内側から release script が行い、entitlements は node の `allow-jit` だけ）。手順、entitlements の実測、公証、DMG、検証、Updater の準備は [docs/release.md](release.md)。
 
 ---
 
@@ -196,4 +206,5 @@ npm test -w @mp4-to-ifo/desktop                  # vitest（UI）+ engine（同�
 ```
 
 - Rust（rustup の stable）が必要。`npm run app` は `RUSTFLAGS=--remap-path-prefix=$HOME=~` で、Rust のバイナリにビルドした Mac のホームのパスが入らないようにする。
-- 出力: `apps/desktop/src-tauri/target/release/bundle/macos/MP4 to IFO.app`。`binaries/`、`engine/`、`target/`、`build/` は git に入れない。
+- 出力: `apps/desktop/src-tauri/target/release/bundle/macos/MP4 to IFO.app`（署名なし、ローカル確認用）。`binaries/`、`engine/`、`target/`、`build/` は git に入れない。
+- 配布用（署名・公証・DMG）は `npm run release:mac`（docs/release.md）。
