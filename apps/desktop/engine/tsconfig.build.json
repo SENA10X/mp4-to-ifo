@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": false, "outDir": "../src-tauri/engine", "rootDir": ".", "declaration": false, "customConditions": [] },
+  "include": ["engine.ts"]
+}

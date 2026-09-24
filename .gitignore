@@ -1,0 +1,48 @@
+# Test media and PoC output must never be committed
+samples/
+output/
+*.mp4
+*.mov
+*.iso
+*.zip
+*.mpg
+*.vob
+*.VOB
+VIDEO_TS/
+AUDIO_TS/
+.DS_Store
+node_modules/
+build/
+dist/
+
+# Desktop build outputs
+apps/desktop/build/
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/engine/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# Logs, coverage and temporary files
+*.log
+coverage/
+*.tmp
+*.partial/
+
+# Credentials and release secrets
+.env
+.env.*
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.cer
+*.mobileprovision
+*_recovery_codes.txt
+npm_recovery_codes.txt
+.npmrc
+
+# Release artifacts
+*.dmg
+*.app/
+*.tgz

@@ -1,0 +1,40 @@
+{
+  "name": "@mp4-to-ifo/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MP4 to IFO for macOS (Tauri 2).",
+  "license": "MIT",
+  "author": "SENA",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:ui": "tsc -p tsconfig.json && vite build",
+    "build:engine": "node scripts/build-engine.mjs",
+    "build:toolchain": "scripts/build-toolchain.sh",
+    "tauri": "tauri",
+    "app": "npm run build:engine && RUSTFLAGS=\"--remap-path-prefix=$HOME=~\" tauri build --bundles app && node scripts/check-bundle.mjs",
+    "typecheck": "tsc -p tsconfig.json && tsc -p engine/tsconfig.json",
+    "build": "npm run build:ui",
+    "test": "vitest run && node --conditions=development --test --test-concurrency=1 \"test/engine/*.test.ts\""
+  },
+  "dependencies": {
+    "@mp4-to-ifo/core": "0.1.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
+    "@tauri-apps/plugin-notification": "^2.4.0",
+    "@tauri-apps/plugin-opener": "^2.5.5",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.5",
+    "@types/node": "^22.20.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}

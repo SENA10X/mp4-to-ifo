@@ -1,0 +1,19 @@
+{
+  "name": "mp4-to-ifo-workspace",
+  "private": true,
+  "license": "MIT",
+  "author": "SENA",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces",
+    "build": "npm run build --workspaces",
+    "test": "npm test --workspaces"
+  }
+}

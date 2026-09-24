@@ -1,0 +1,57 @@
+# Bundled toolchain build (2026-09-24T05:47:53Z)
+target: aarch64-apple-darwin, macOS 14.0+, built on macOS 26.6.2 with Apple clang version 21.0.0 (clang-2100.3.34.2)
+
+## FFmpeg 7.1 (ffmpeg, ffprobe)
+source: https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz sha256 40973d44970dbc83ef302b0609f2e74982be2d85916dd2ee7472d30678a7abe6
+configuration: --prefix=/usr/local --disable-autodetect --disable-network --disable-doc --disable-ffplay --disable-shared --enable-static --enable-zlib --enable-iconv --enable-libzimg --pkg-config-flags=--static --extra-cflags='-mmacosx-version-min=14.0' --extra-ldflags='-mmacosx-version-min=14.0' --extra-libs='-liconv -lc++'
+license (ffmpeg -L): GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version
+ffmpeg sha256 e42b7682ebb5c36694d6f7f227ce4c1e61afe24a441d767d03162f5c9e0cfcfd
+ffprobe sha256 26920d2d28ee44e735c3f1fe1ee894e9092b3d72f06df80b8ce3e40a1425c174
+
+## zimg 3.0.5 (statically linked into ffmpeg/ffprobe for zscale)
+source: https://github.com/sekrit-twc/zimg/archive/refs/tags/release-3.0.5.tar.gz sha256 a9a0226bf85e0d83c41a8ebe4e3e690e1348682f6a2a7838f1b8cbff1b799bcf
+configure: --disable-shared --enable-static
+
+## dvdauthor 0.7.2 (dvdauthor tool only)
+source: https://downloads.sourceforge.net/project/dvdauthor/dvdauthor-0.7.2.tar.gz sha256 3020a92de9f78eb36f48b6f22d5a001c47107826634a785a62dfcd080f612eb7
+configure: --disable-dvdunauthor, libxml2 from the macOS SDK
+dvdauthor sha256 e21ba45c97347cfe1b6046fbd8f05f61fc202931fc7717dbf4ea09c652d6c9c6
+
+## Node.js 22.23.2 (runtime for the conversion core)
+source: https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-arm64.tar.gz sha256 61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6 (verified against SHASUMS256.txt)
+node sha256 18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572
+
+## Linked libraries (system only)
+dvdauthor-aarch64-apple-darwin:
+	/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)
+	/usr/lib/libxml2.2.dylib (compatibility version 10.0.0, current version 10.9.0)
+	/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)
+	/usr/lib/libicucore.A.dylib (compatibility version 1.0.0, current version 78.1.0)
+ffmpeg-aarch64-apple-darwin:
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)
+	/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)
+	/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)
+	/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 5027.0.69)
+	/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo (compatibility version 1.2.0, current version 758.27.0)
+	/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia (compatibility version 1.0.0, current version 3350.77.5)
+	/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)
+ffprobe-aarch64-apple-darwin:
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)
+	/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)
+	/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)
+	/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 5027.0.69)
+	/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo (compatibility version 1.2.0, current version 758.27.0)
+	/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia (compatibility version 1.0.0, current version 3350.77.5)
+	/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)
+node-aarch64-apple-darwin:
+	/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 3038.1.255)
+	/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 61439.1.1)
+	/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 1800.101.0)
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)
+
+## Minimum macOS
+dvdauthor-aarch64-apple-darwin: 14.0
+ffmpeg-aarch64-apple-darwin: 14.0
+ffprobe-aarch64-apple-darwin: 14.0
+node-aarch64-apple-darwin: 11.0

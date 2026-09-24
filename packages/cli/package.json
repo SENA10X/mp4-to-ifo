@@ -1,0 +1,47 @@
+{
+  "name": "mp4-to-ifo",
+  "version": "0.1.0",
+  "description": "Convert an MP4 video into DVD-Video files (VIDEO_TS, VIDEO_TS.zip and an ISO), with verification. Runs locally.",
+  "license": "MIT",
+  "author": "SENA",
+  "keywords": ["dvd", "dvd-video", "video_ts", "ifo", "vob", "iso", "mp4", "mpeg-2", "cli"],
+  "homepage": "https://sena10x.github.io/mp4-to-ifo/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SENA10X/mp4-to-ifo.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/SENA10X/mp4-to-ifo/issues"
+  },
+  "type": "module",
+  "bin": {
+    "mp4-to-ifo": "dist/main.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/main.js",
+    "test": "node --conditions=development --test --test-concurrency=1 \"test/unit/*.test.ts\" \"test/integration/*.test.ts\"",
+    "test:unit": "node --conditions=development --test \"test/unit/*.test.ts\"",
+    "prepack": "node scripts/bundle-core.mjs",
+    "postpack": "node scripts/bundle-core.mjs --clean"
+  },
+  "dependencies": {
+    "@mp4-to-ifo/core": "0.1.0"
+  },
+  "bundleDependencies": [
+    "@mp4-to-ifo/core"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^7.0.2"
+  }
+}

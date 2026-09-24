@@ -1,0 +1,395 @@
+// Field temporal check: how many distinct moments of the source reach the output fields, and in what
+// order. The Phase 5.1 review converted 60p to 29.97p but kept the label interlace-60i: every picture
+// that remained was shown at the right time, so timing checks passed while half the motion was gone.
+//
+// Independent of the generator: nothing here uses frame-rate.ts (filters or expectedDisplayTime), and
+// the decoding is its own. Each output frame is split into its two fields (display order from the
+// frame's own field-order flag); each source frame is scaled to the active area's height and split
+// into the same two line sets, so a field is compared with source pictures of the same parity. Every output
+// field is matched by content to the most similar source frame; distinct source moments are counted
+// from the source alone. The only input from the plan besides geometry and colour matrix is the
+// strategy's claimed temporal capacity (59.94i carries up to 59.94 moments per second, 3:2 pulldown
+// 23.976, the progressive strategies 29.97).
+//
+// The same comparison gives the picture change points for sync.ts: where the output first shows a
+// source moment, against where that moment starts in the source. Repeated or indistinguishable source
+// frames are one moment (Phase 5.2): which of several identical frames a field "matches" carries no
+// timing information, so only the change into a moment is timed.
+
+import { runTool } from '../process.ts';
+import type { FrameRateStrategyId } from '../profile/frame-rate.ts';
+import type { ActiveArea } from '../profile/video.ts';
+import type { Toolchain } from '../toolchain.ts';
+
+const W = 64;
+const H = 48;
+const PIXELS = W * H;
+/** Output window per position; source frames are decoded this much wider on each side. */
+const WINDOW_SEC = 1.2;
+const SOURCE_MARGIN_SEC = 0.35;
+/** Moments are counted this far inside the window (display and source times differ by < 50 ms). */
+const EDGE_SEC = 0.1;
+/** Fields are compared with source frames at most this far apart in time. */
+const SEARCH_SEC = 0.25;
+/** Match score below which a field is not treated as showing any source frame. */
+const MIN_NCC = 0.9;
+/** Differences below this (L2 of unit vectors, NCC > 0.99995) never separate two source frames. */
+const SAME_DIST = 0.01;
+/**
+ * A new source moment starts only where consecutive source frames differ by at least this many times
+ * the typical field-to-source residual: then a field cannot be mistaken for the other side. Smaller
+ * differences (repeated frames, coding noise, motion too subtle to resolve) stay inside one moment,
+ * so no precision is invented that the pictures do not have.
+ */
+const CLEAR_FACTOR = 3;
+/** A multi-frame moment has a precise start only if the strategy shows every source frame (rate <= capacity). */
+const RATE_TOLERANCE = 1.01;
+
+/** Distinct source moments per second the strategy can deliver (a DVD property, not the generator's mapping). */
+export function temporalCapacity(strategy: FrameRateStrategyId): number {
+  switch (strategy) {
+    case 'interlace-60i':
+      return 60000 / 1001; // one moment per field
+    case 'telecine-3-2':
+      return 24000 / 1001; // film frames spread over 3:2 fields
+    case 'passthrough-29.97':
+    case 'decimate-30':
+    case 'progressive-29.97':
+      return 30000 / 1001; // both fields from one moment
+  }
+}
+
+/** A decoded picture as its two line sets (zero-mean, unit-norm 64x48 luma each). */
+export interface FieldPair {
+  /** Seconds on the shared timeline (file origin removed). */
+  t: number;
+  /** Frame duration (seconds): the second field is displayed half of it later. */
+  duration: number;
+  /** Field shown first: 'top' unless the frame is flagged bottom field first. */
+  first: 'top' | 'bottom';
+  top: Float32Array;
+  bottom: Float32Array;
+}
+
+export interface OutputField {
+  t: number;
+  parity: 'top' | 'bottom';
+  px: Float32Array;
+}
+
+/** Output frames -> fields in display order. */
+export function displayFields(frames: FieldPair[]): OutputField[] {
+  return frames.flatMap((f) => {
+    const second = f.first === 'top' ? 'bottom' : 'top';
+    return [
+      { t: f.t, parity: f.first, px: f[f.first] },
+      { t: f.t + f.duration / 2, parity: second, px: f[second] },
+    ];
+  });
+}
+
+export interface FieldStats {
+  /** Output fields compared, and those that matched a source frame. */
+  fields: number;
+  matchedFields: number;
+  /** Median distance of matched fields to their source frame (the comparison's noise level). */
+  residual: number;
+  /** Distinct source moments in the measured interval, and those clear enough to judge. */
+  allMoments: number;
+  sourceMoments: number;
+  /** Of the clear moments, how many a correct conversion must show (capped by the capacity) and how many were shown. */
+  expected: number;
+  shown: number;
+  /** Consecutive fields on clear moments that change moment, and those that go back in time. */
+  steps: number;
+  backwards: number;
+}
+
+export const emptyFieldStats = (): FieldStats => ({ fields: 0, matchedFields: 0, residual: 0, allMoments: 0, sourceMoments: 0, expected: 0, shown: 0, steps: 0, backwards: 0 });
+
+export function addFieldStats(a: FieldStats, b: FieldStats): FieldStats {
+  const matched = a.matchedFields + b.matchedFields;
+  return {
+    fields: a.fields + b.fields,
+    matchedFields: matched,
+    residual: matched ? (a.residual * a.matchedFields + b.residual * b.matchedFields) / matched : 0,
+    allMoments: a.allMoments + b.allMoments,
+    sourceMoments: a.sourceMoments + b.sourceMoments,
+    expected: a.expected + b.expected,
+    shown: a.shown + b.shown,
+    steps: a.steps + b.steps,
+    backwards: a.backwards + b.backwards,
+  };
+}
+
+function ncc(a: Float32Array, b: Float32Array): number {
+  let s = 0;
+  for (let i = 0; i < PIXELS; i++) s += (a[i] ?? 0) * (b[i] ?? 0);
+  return s;
+}
+
+/** Euclidean distance between unit vectors. */
+const dist = (a: Float32Array, b: Float32Array) => Math.sqrt(Math.max(0, 2 - 2 * ncc(a, b)));
+
+/** Where the output first shows a source moment (display time) and where that moment starts in the source. */
+export interface ChangePoint {
+  out: number;
+  src: number;
+}
+
+export interface FieldAnalysis {
+  stats: FieldStats;
+  /** Change points of clear moments that the output enters cleanly (for picture timing). */
+  changes: ChangePoint[];
+}
+
+/**
+ * Compare output fields with source frames. Moments are counted over [from, to) on the source timeline;
+ * `fields` should cover that interval with some margin.
+ */
+export function analyseFields(source: FieldPair[], fields: OutputField[], from: number, to: number, capacityHz: number): FieldAnalysis {
+  // Each field shows the most similar same-parity source picture nearby (if it is similar at all).
+  const stats = emptyFieldStats();
+  const bestFrame: (number | null)[] = [];
+  const residuals: number[] = [];
+  for (const f of fields) {
+    stats.fields++;
+    let best = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < source.length; i++) {
+      const s = source[i];
+      if (!s || Math.abs(s.t - f.t) > SEARCH_SEC) continue;
+      const score = ncc(f.px, s[f.parity]);
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    }
+    if (best < 0 || bestScore < MIN_NCC) {
+      bestFrame.push(null);
+      continue;
+    }
+    stats.matchedFields++;
+    residuals.push(Math.sqrt(Math.max(0, 2 - 2 * bestScore)));
+    bestFrame.push(best);
+  }
+  residuals.sort((a, b) => a - b);
+  const residual = residuals[residuals.length >> 1] ?? 0;
+  stats.residual = residual;
+
+  // Moments: a new one starts only at a clear change (both line sets), so repeats and unresolvable
+  // differences never split a moment. first[k] / last[k] are the moment's frame indices.
+  const boundary = Math.max(SAME_DIST, CLEAR_FACTOR * residual);
+  const step = (i: number) => {
+    const a = source[i];
+    const b = source[i - 1];
+    return a && b ? Math.min(dist(a.top, b.top), dist(a.bottom, b.bottom)) : 0;
+  };
+  const momentOf: number[] = [];
+  const first: number[] = [];
+  const last: number[] = [];
+  source.forEach((_, i) => {
+    if (i === 0 || step(i) >= boundary) first.push(i);
+    const k = first.length - 1;
+    momentOf.push(k);
+    last[k] = i;
+  });
+  const matched = bestFrame.map((i) => (i === null ? null : (momentOf[i] ?? null)));
+
+  // Clear moments: bounded by clear changes on both sides (not cut off by the decoded range).
+  const inside = (k: number) => {
+    const t = source[first[k] ?? -1]?.t;
+    return t !== undefined && t >= from && t < to;
+  };
+  const clear = (k: number) => residuals.length > 0 && (first[k] ?? 0) > 0 && (last[k] ?? Infinity) + 1 < source.length;
+  const moments = first.map((_, k) => k).filter(inside);
+  const clearMoments = moments.filter(clear);
+  const isClear = new Set(clearMoments);
+
+  const shown = new Set(matched.filter((m): m is number => m !== null));
+  let previous: number | null = null;
+  for (const m of matched) {
+    const current = m !== null && isClear.has(m) ? m : null;
+    if (current !== null && previous !== null && current !== previous) {
+      stats.steps++;
+      if (current < previous) stats.backwards++;
+    }
+    previous = current;
+  }
+
+  // Change points. A moment of several frames starts precisely only if every source frame is shown;
+  // when the strategy skips source frames, its first frame may be skipped and the start is unknown.
+  const intervals = source.slice(1).map((s, i) => s.t - (source[i]?.t ?? 0)).sort((a, b) => a - b);
+  const frameInterval = intervals[intervals.length >> 1] ?? 0;
+  const everyFrameShown = frameInterval > 0 && 1 / frameInterval <= capacityHz * RATE_TOLERANCE;
+  const changes: ChangePoint[] = [];
+  for (const k of clearMoments) {
+    if (!everyFrameShown && (last[k] ?? 0) > (first[k] ?? 0)) continue;
+    const j = matched.indexOf(k);
+    const before = j > 0 ? matched[j - 1] : null;
+    // The output must enter the moment from an earlier one, field to field; otherwise the entry is unclear.
+    if (j <= 0 || before === null || before === undefined || before >= k) continue;
+    const field = fields[j];
+    const src = source[first[k] ?? -1];
+    if (field && src) changes.push({ out: field.t, src: src.t });
+  }
+
+  stats.allMoments = moments.length;
+  stats.sourceMoments = clearMoments.length;
+  // When the source has more moments than the strategy can carry, a correct output shows that share.
+  const share = moments.length > 0 ? Math.min(1, capacityHz * (to - from) / moments.length) : 0;
+  stats.expected = clearMoments.length * share;
+  stats.shown = clearMoments.filter((k) => shown.has(k)).length;
+  return { stats, changes };
+}
+
+export type FieldTemporalStatus = 'passed' | 'failed' | 'unmeasurable';
+
+export interface FieldTemporalResult {
+  status: FieldTemporalStatus;
+  capacityHz: number;
+  /** Shown / expected distinct source moments (1 = every moment the strategy can carry reached a field). */
+  coverage: number | null;
+  /** Share of moment changes between consecutive fields that go back in time (field order). */
+  backwardRatio: number | null;
+  /** The worst single window with enough evidence of its own (a local fault is not averaged away). */
+  worstWindow: { coverage: number | null; backwardRatio: number | null; judged: number };
+  stats: FieldStats;
+  reason: string;
+}
+
+/** Fewer clear source moments than this (about a second of motion over all windows) cannot be judged. */
+export const MIN_FIELD_MOMENTS = 24;
+/** At least this share of fields must match a source frame for the comparison to mean anything. */
+export const MIN_MATCHED_FIELDS = 0.5;
+/**
+ * Lowest acceptable coverage and highest acceptable backward share (docs/core.md §7). Losing every
+ * other field gives a coverage of 0.5; swapped field order gives a backward share of 0.5.
+ */
+export const MIN_FIELD_COVERAGE = 0.8;
+export const MAX_BACKWARD_RATIO = 0.1;
+/** A single window is judged on its own when it expects at least this many moments (or field steps). */
+export const MIN_WINDOW_MOMENTS = 12;
+
+const ratio = (a: number, b: number) => Math.min(1, Math.round(a / b * 1000) / 1000);
+
+/**
+ * `windows`: the per-window statistics summed into `stats`. The verdict needs both the whole and every
+ * window with enough evidence to pass: a fault confined to one sampled window is not diluted by the
+ * others (Phase 5.2).
+ */
+export function judgeFields(stats: FieldStats, capacityHz: number, windows: FieldStats[] = []): FieldTemporalResult {
+  const coverages = windows.filter((w) => w.expected >= MIN_WINDOW_MOMENTS).map((w) => ratio(w.shown, w.expected));
+  const backwards = windows.filter((w) => w.steps >= MIN_WINDOW_MOMENTS).map((w) => ratio(w.backwards, w.steps));
+  const worstWindow = {
+    coverage: coverages.length ? Math.min(...coverages) : null,
+    backwardRatio: backwards.length ? Math.max(...backwards) : null,
+    judged: Math.max(coverages.length, backwards.length),
+  };
+  const base = { capacityHz, stats, worstWindow };
+  if (stats.fields === 0 || stats.matchedFields / stats.fields < MIN_MATCHED_FIELDS) {
+    return { ...base, status: 'unmeasurable', coverage: null, backwardRatio: null, reason: `not measurable: ${stats.matchedFields}/${stats.fields} fields matched the source` };
+  }
+  if (stats.sourceMoments < MIN_FIELD_MOMENTS || stats.expected < MIN_FIELD_MOMENTS / 2) {
+    return { ...base, status: 'unmeasurable', coverage: null, backwardRatio: null, reason: `not measurable: ${stats.sourceMoments} clearly distinct source moments (still or slow picture)` };
+  }
+  const coverage = ratio(stats.shown, stats.expected);
+  const backwardRatio = stats.steps ? ratio(stats.backwards, stats.steps) : 0;
+  const ok = coverage >= MIN_FIELD_COVERAGE && backwardRatio <= MAX_BACKWARD_RATIO &&
+    (worstWindow.coverage ?? 1) >= MIN_FIELD_COVERAGE && (worstWindow.backwardRatio ?? 0) <= MAX_BACKWARD_RATIO;
+  return {
+    ...base,
+    status: ok ? 'passed' : 'failed',
+    coverage,
+    backwardRatio,
+    reason: `${stats.shown} of ${Math.round(stats.expected)} expected source moments reached a field (coverage ${coverage}, up to ${capacityHz.toFixed(3)}/s), ` +
+      `${stats.backwards}/${stats.steps} field steps backwards; worst of ${worstWindow.judged} windows: coverage ${worstWindow.coverage ?? '-'}, backwards ${worstWindow.backwardRatio ?? '-'}`,
+  };
+}
+
+function normalise(raw: Buffer, offset: number): Float32Array {
+  const px = new Float32Array(PIXELS);
+  let mean = 0;
+  for (let i = 0; i < PIXELS; i++) mean += raw[offset + i] ?? 0;
+  mean /= PIXELS;
+  let norm = 0;
+  for (let i = 0; i < PIXELS; i++) {
+    const v = (raw[offset + i] ?? 0) - mean;
+    px[i] = v;
+    norm += v * v;
+  }
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < PIXELS; i++) px[i] = (px[i] ?? 0) / norm;
+  return px;
+}
+
+/**
+ * Decode pictures in [start, start+duration) (seconds from the file origin) as top/bottom line sets.
+ * `prefix` brings the picture to the active area's lines, 64 columns wide (scale for the source, crop for the output).
+ */
+async function decodeFieldPairs(tc: Toolchain, input: string, origin: number, map: string, start: number, duration: number, prefix: string, signal?: AbortSignal): Promise<FieldPair[]> {
+  const info: { t: number; duration: number; first: 'top' | 'bottom' }[] = [];
+  const vf = `${prefix},showinfo,split[a][b];[a]field=top,scale=${W}:${H}:flags=area[t];[b]field=bottom,scale=${W}:${H}:flags=area[u];[t][u]vstack,format=gray`;
+  // Read only the window (input -t counts from the seek point), not a fixed number of frames.
+  const seek = Math.max(0, start - 0.5);
+  const r = await runTool(tc.ffmpeg, [
+    '-hide_banner', '-nostdin', '-v', 'info', '-copyts', '-ss', seek.toFixed(4), '-t', (start + duration - seek + 0.1).toFixed(4), '-i', input,
+    '-map', map, '-vf', vf, '-fps_mode', 'passthrough', '-f', 'rawvideo', '-',
+  ], {
+    errorCode: 'VERIFY_ERROR',
+    signal,
+    binary: true,
+    onStderrLine: (line) => {
+      if (!/Parsed_showinfo/.test(line)) return;
+      const t = /pts_time:\s*(-?[\d.]+)/.exec(line)?.[1];
+      if (t === undefined) return;
+      const d = Number(/duration_time:\s*([\d.]+)/.exec(line)?.[1] ?? 1001 / 30000);
+      info.push({ t: Number(t), duration: d > 0 ? d : 1001 / 30000, first: /\bi:B\b/.test(line) ? 'bottom' : 'top' });
+    },
+  });
+  const buf = r.stdoutBuffer;
+  const out: FieldPair[] = [];
+  for (let i = 0; (i + 1) * 2 * PIXELS <= buf.length && i < info.length; i++) {
+    const m = info[i]!;
+    const t = m.t - origin;
+    if (t >= start && t < start + duration) {
+      out.push({ t, duration: m.duration, first: m.first, top: normalise(buf, i * 2 * PIXELS), bottom: normalise(buf, i * 2 * PIXELS + PIXELS) });
+    }
+  }
+  return out;
+}
+
+export interface FieldMeasureInput {
+  toolchain: Toolchain;
+  source: { path: string; origin: number; videoIndex: number; duration: number; colorMatrix: 'bt709' | 'bt601' };
+  output: { input: string; origin: number; active: ActiveArea };
+  /** Window centres (seconds), the same deterministic positions as the sync measurement. */
+  windows: number[];
+  capacityHz: number;
+  signal?: AbortSignal;
+}
+
+export async function measureFields(input: FieldMeasureInput): Promise<FieldAnalysis & { windows: FieldStats[] }> {
+  const { toolchain: tc, source, output, signal } = input;
+  const a = output.active;
+  // The source is brought to the active area in its own step: a single 1920 -> 64 area scale (with the
+  // colour conversion) blurred fine detail differently from the output and hid the motion. Then both
+  // sides are narrowed to 64 columns; the lines, and so the field parity, stay.
+  const sourcePrefix = `scale=${a.width}:${a.height}:flags=area:in_color_matrix=${source.colorMatrix}:out_color_matrix=bt601,scale=${W}:${a.height}:flags=area`;
+  const outputPrefix = `crop=${a.width}:${a.height}:${a.x}:${a.y},scale=${W}:${a.height}:flags=area`;
+  let stats = emptyFieldStats();
+  const changes: ChangePoint[] = [];
+  const windows: FieldStats[] = [];
+  for (const centre of input.windows) {
+    const outStart = Math.max(0, centre - WINDOW_SEC / 2);
+    const srcStart = Math.max(0, outStart - SOURCE_MARGIN_SEC);
+    const src = await decodeFieldPairs(tc, source.path, source.origin, `0:${source.videoIndex}`, srcStart, WINDOW_SEC + 2 * SOURCE_MARGIN_SEC, sourcePrefix, signal);
+    const out = await decodeFieldPairs(tc, output.input, output.origin, '0:v:0', outStart, WINDOW_SEC, outputPrefix, signal);
+    const end = Math.min(outStart + WINDOW_SEC, source.duration);
+    const window = analyseFields(src, displayFields(out), outStart + EDGE_SEC, end - EDGE_SEC, input.capacityHz);
+    stats = addFieldStats(stats, window.stats);
+    windows.push(window.stats);
+    changes.push(...window.changes);
+  }
+  return { stats, changes, windows };
+}
