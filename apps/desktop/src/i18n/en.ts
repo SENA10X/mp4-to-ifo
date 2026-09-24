@@ -83,6 +83,7 @@ export const en = {
   'complete.verified': 'Software verification passed.',
   'complete.notMeasured': 'Not measured for this video: {n} check(s).',
   'complete.open': 'Open Output Folder',
+  'complete.openFailed': 'Could not open the output folder.',
   'complete.test': 'Before submitting your DVD, burn the ISO and test the disc on a DVD player.',
   'complete.burnGuide': 'How to Burn a DVD',
   'complete.another': 'Convert Another',
@@ -122,7 +123,7 @@ export const en = {
   'settings.language': 'Language',
   'settings.version': 'Version',
   'settings.updates': 'Check for Updates',
-  'settings.updatesUnavailable': 'Update checking is not available in this development build.',
+  'settings.updatesUnavailable': 'Update checking is not available in this build.',
   'settings.licenses': 'Open Source Licenses',
   'settings.back': 'Back',
 

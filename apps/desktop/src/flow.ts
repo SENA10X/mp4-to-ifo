@@ -10,7 +10,7 @@ export type State =
   | { screen: 'analyzing'; input: string }
   | { screen: 'plan'; input: string; data: PlanMessage }
   | { screen: 'converting'; input: string; data: PlanMessage; progress: ProgressEvent | null; cancelling: boolean }
-  | { screen: 'complete'; input: string; outputDir: string; isoFileName: string; notMeasured: number }
+  | { screen: 'complete'; input: string; outputDir: string; isoFileName: string; notMeasured: number; openFailed: boolean }
   | { screen: 'failed'; input: string | null; error: EngineError };
 
 export type Action =
@@ -22,6 +22,8 @@ export type Action =
   | { type: 'engine'; message: EngineMessage }
   | { type: 'engineExit'; code: number | null }
   | { type: 'cancelRequested' }
+  /** Open Output Folder finished (it failed when ok is false). */
+  | { type: 'opened'; ok: boolean }
   | { type: 'reset' };
 
 export const initialState: State = { screen: 'home', notice: null };
@@ -69,7 +71,7 @@ export function reduce(state: State, action: Action): State {
       const m = action.message;
       if (m.type === 'progress') return { ...state, progress: m.event };
       if (m.type === 'done') {
-        return { screen: 'complete', input: state.input, outputDir: m.result.outputDir, isoFileName: m.result.isoFileName, notMeasured: m.result.notMeasured };
+        return { screen: 'complete', input: state.input, outputDir: m.result.outputDir, isoFileName: m.result.isoFileName, notMeasured: m.result.notMeasured, openFailed: false };
       }
       if (m.type === 'error') return { screen: 'failed', input: state.input, error: m.error };
       return state;
@@ -80,6 +82,8 @@ export function reduce(state: State, action: Action): State {
       return { screen: 'failed', input: state.input, error: internal(`engine exited (${action.code ?? 'signal'})`) };
     case 'cancelRequested':
       return state.screen === 'converting' ? { ...state, cancelling: true } : state;
+    case 'opened':
+      return state.screen === 'complete' ? { ...state, openFailed: !action.ok } : state;
     case 'reset':
       return initialState;
   }

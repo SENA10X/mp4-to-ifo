@@ -141,7 +141,15 @@ export function Converting(props: { progress: ProgressEvent | null; cancelling: 
   );
 }
 
-export function Complete(props: { outputDir: string; isoFileName: string; notMeasured: number; onOpen: () => void; onGuide: () => void; onAnother: () => void }) {
+export function Complete(props: {
+  outputDir: string;
+  isoFileName: string;
+  notMeasured: number;
+  openFailed: boolean;
+  onOpen: () => void;
+  onGuide: () => void;
+  onAnother: () => void;
+}) {
   const { t } = useI18n();
   return (
     <section className="complete">
@@ -156,6 +164,11 @@ export function Complete(props: { outputDir: string; isoFileName: string; notMea
       <button type="button" className="primary" onClick={props.onOpen} autoFocus>
         {t('complete.open')}
       </button>
+      {props.openFailed && (
+        <p className="error-text" role="alert">
+          {t('complete.openFailed')}
+        </p>
+      )}
       <p className="advice">{t('complete.test')}</p>
       <div className="actions">
         {config.burnGuideUrl && (

@@ -14,13 +14,14 @@
 use serde::Serialize;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, State, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
 
 /// How long "Cancel and Quit" waits for the engine to clean up before force-killing its process group.
 const QUIT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(20);
@@ -37,6 +38,9 @@ struct Running {
 struct Conversion {
     running: Mutex<Option<Running>>,
     quitting: AtomicBool,
+    /// The output folder of the last conversion that passed verification (from the engine's "done").
+    /// "Open Output Folder" opens only this; the UI never passes a path to open.
+    output: Mutex<Option<PathBuf>>,
 }
 
 impl Conversion {
@@ -118,6 +122,8 @@ fn start_conversion(
     if slot.is_some() {
         return Err("a conversion is already running".into());
     }
+    *state.output.lock().map_err(|e| e.to_string())? = None;
+    let chosen = PathBuf::from(&output_dir);
     let mut child = engine_command(&app, &["convert"])?
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -137,6 +143,11 @@ fn start_conversion(
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) {
+                if let Some(dir) = verified_output(&chosen, &message) {
+                    if let Ok(mut output) = state.output.lock() {
+                        *output = Some(dir);
+                    }
+                }
                 let _ = app.emit("engine", message);
             }
         }
@@ -152,6 +163,33 @@ fn start_conversion(
         }
     });
     Ok(())
+}
+
+/// The output folder from an engine "done" message, accepted only if it is a real folder directly inside
+/// the folder the user chose for this conversion (the core creates it there after verification).
+fn verified_output(chosen: &Path, message: &serde_json::Value) -> Option<PathBuf> {
+    if message.get("type")?.as_str()? != "done" {
+        return None;
+    }
+    let dir = PathBuf::from(message.get("result")?.get("outputDir")?.as_str()?);
+    let plain = dir.components().all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
+    let valid = plain && dir.is_absolute() && dir.parent() == Some(chosen) && is_real_dir(&dir);
+    valid.then_some(dir)
+}
+
+/// A directory that is not a symbolic link.
+fn is_real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).map(|m| m.is_dir()).unwrap_or(false)
+}
+
+/// Open the verified output folder of the last conversion in Finder. Takes no path from the UI.
+#[tauri::command]
+fn open_output_folder(app: AppHandle, state: State<'_, Arc<Conversion>>) -> Result<(), String> {
+    let dir = state.output.lock().map_err(|e| e.to_string())?.clone().ok_or("no verified output folder")?;
+    if !is_real_dir(&dir) {
+        return Err("the output folder is no longer there".into());
+    }
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Ask the engine to cancel; it stops ffmpeg, removes partial output and exits.
@@ -271,7 +309,7 @@ pub fn run() {
                 request_quit(app);
             }
         })
-        .invoke_handler(tauri::generate_handler![analyze, start_conversion, cancel_conversion, cancel_and_quit, read_licenses])
+        .invoke_handler(tauri::generate_handler![analyze, start_conversion, cancel_conversion, cancel_and_quit, open_output_folder, read_licenses])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 // Closing the only window quits the app (after asking, while converting).
@@ -293,4 +331,43 @@ pub fn run() {
         RunEvent::Exit => stop_engine(&conversion, EXIT_CLEANUP_TIMEOUT),
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn done(dir: &Path) -> serde_json::Value {
+        json!({ "type": "done", "result": { "outputDir": dir.to_string_lossy(), "isoFileName": "a.iso" } })
+    }
+
+    #[test]
+    fn accepts_only_a_verified_folder_inside_the_chosen_folder() {
+        let root = std::env::temp_dir().join(format!("mp4-to-ifo-open-{}", std::process::id()));
+        let chosen = root.join("chosen");
+        let output = chosen.join("movie");
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir_all(&output).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, chosen.join("link")).unwrap();
+        std::fs::write(chosen.join("file"), b"").unwrap();
+
+        assert_eq!(verified_output(&chosen, &done(&output)), Some(output.clone()));
+        // Not a "done" message, or no result.
+        assert_eq!(verified_output(&chosen, &json!({ "type": "progress", "result": { "outputDir": output } })), None);
+        assert_eq!(verified_output(&chosen, &json!({ "type": "done" })), None);
+        // Anything that is not a real folder directly inside the chosen folder.
+        assert_eq!(verified_output(&chosen, &done(&elsewhere)), None);
+        assert_eq!(verified_output(&chosen, &done(&chosen)), None);
+        assert_eq!(verified_output(&chosen, &done(&output.join("VIDEO_TS"))), None);
+        assert_eq!(verified_output(&chosen, &done(&chosen.join("link"))), None);
+        assert_eq!(verified_output(&chosen, &done(&chosen.join("file"))), None);
+        assert_eq!(verified_output(&chosen, &done(&chosen.join("missing"))), None);
+        assert_eq!(verified_output(&chosen, &done(Path::new("movie"))), None);
+        assert_eq!(verified_output(&chosen, &done(&chosen.join("../elsewhere"))), None);
+        assert_eq!(verified_output(&chosen, &done(&chosen.join(".."))), None);
+        assert_eq!(verified_output(Path::new("chosen"), &done(Path::new("chosen/movie"))), None);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }

@@ -85,6 +85,7 @@ export const ja: Record<MessageKey, string> = {
   'complete.verified': 'ソフトウェアによる検証に合格しました。',
   'complete.notMeasured': 'この動画では {n} 項目を測定できませんでした。',
   'complete.open': '出力フォルダを開く',
+  'complete.openFailed': '出力フォルダを開けませんでした。',
   'complete.test': '提出する前に、ISO を DVD に書き込み、DVD プレーヤーで再生を確認してください。',
   'complete.burnGuide': 'DVD の書き込み方',
   'complete.another': '別の MP4 を変換',
@@ -124,7 +125,7 @@ export const ja: Record<MessageKey, string> = {
   'settings.language': '言語',
   'settings.version': 'バージョン',
   'settings.updates': 'アップデートを確認',
-  'settings.updatesUnavailable': 'この開発版では、アップデートの確認は利用できません。',
+  'settings.updatesUnavailable': 'このビルドでは、アップデートの確認は利用できません。',
   'settings.licenses': 'オープンソースライセンス',
   'settings.back': '戻る',
 

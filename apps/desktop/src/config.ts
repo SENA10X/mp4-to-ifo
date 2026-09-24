@@ -1,5 +1,11 @@
 // Links and features that depend on things that do not exist yet. A null URL hides its button, so the
 // app never shows a link to a page that is not published.
+//
+// The web view may open only the URLs set here. Setting one also needs a scoped permission for exactly that
+// URL in src-tauri/capabilities/default.json, e.g.
+//   { "identifier": "opener:allow-open-url", "allow": [{ "url": "https://example.org/exact/page" }] }
+// (test/ui checks that the two match). The web view cannot open files or folders; "Open Output Folder" is a
+// backend command that opens only the verified output folder.
 
 export const config = {
   /** Web burning guide (Phase 6: MP4 to IFO website). */

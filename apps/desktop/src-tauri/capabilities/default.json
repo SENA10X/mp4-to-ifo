@@ -10,8 +10,6 @@
     "dialog:allow-ask",
     "dialog:allow-message",
     "notification:default",
-    "opener:allow-open-path",
-    "opener:allow-open-url",
     "clipboard-manager:allow-write-text"
   ]
 }

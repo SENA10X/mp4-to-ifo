@@ -139,7 +139,8 @@ export function App(props: { bridge: Bridge; storage?: Storage; languages?: read
           outputDir={state.outputDir}
           isoFileName={state.isoFileName}
           notMeasured={state.notMeasured}
-          onOpen={() => void bridge.openFolder(state.outputDir)}
+          openFailed={state.openFailed}
+          onOpen={() => void bridge.openOutputFolder().then(() => dispatch({ type: 'opened', ok: true }), () => dispatch({ type: 'opened', ok: false }))}
           onGuide={() => config.burnGuideUrl && void bridge.openUrl(config.burnGuideUrl)}
           onAnother={() => dispatch({ type: 'reset' })}
         />

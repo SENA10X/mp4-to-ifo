@@ -18,7 +18,9 @@ export interface Bridge {
   onDragDrop(handler: (event: { type: 'enter' | 'leave' } | { type: 'drop'; paths: string[] }) => void): Promise<Unlisten>;
   ask(options: { title: string; message: string; ok: string; cancel: string }): Promise<boolean>;
   notify(title: string, body: string): Promise<void>;
-  openFolder(path: string): Promise<void>;
+  /** Open the output folder of the conversion that just passed verification. The backend knows which
+   *  folder that is; no path crosses this boundary. */
+  openOutputFolder(): Promise<void>;
   openUrl(url: string): Promise<void>;
   copy(text: string): Promise<void>;
   readLicenses(): Promise<{ name: string; text: string }[]>;
@@ -65,7 +67,7 @@ export async function tauriBridge(): Promise<Bridge> {
       if (!granted) granted = (await notification.requestPermission()) === 'granted';
       if (granted) notification.sendNotification({ title, body });
     },
-    openFolder: (path) => opener.openPath(path),
+    openOutputFolder: () => invoke('open_output_folder'),
     openUrl: (url) => opener.openUrl(url),
     copy: (text) => clipboard.writeText(text),
     readLicenses: () => invoke('read_licenses'),

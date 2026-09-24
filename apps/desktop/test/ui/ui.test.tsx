@@ -4,9 +4,10 @@
 import fs from 'node:fs';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, expectTypeOf, test, vi } from 'vitest';
 import { App } from '../../src/App.tsx';
-import type { Bridge } from '../../src/bridge.ts';
+import { tauriBridge, type Bridge } from '../../src/bridge.ts';
+import { config } from '../../src/config.ts';
 import type { EngineError, EngineMessage, PlanIssue, ProgressEvent } from '../../src/engine-types.ts';
 import { initialState, pickInput, reduce, type PlanMessage, type State } from '../../src/flow.ts';
 import { en } from '../../src/i18n/en.ts';
@@ -15,6 +16,9 @@ import { ja } from '../../src/i18n/ja.ts';
 import { errorMessage, formatDuration, formatFps, formatSize } from '../../src/messages.ts';
 import { Analyzing, Complete, Converting, Failed, Home, Plan, Settings } from '../../src/screens.tsx';
 import fixture from './plan.fixture.json';
+
+const invoke = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => {}));
+vi.mock('@tauri-apps/api/core', async (original) => ({ ...(await original<object>()), invoke }));
 
 const planMessage = fixture as unknown as PlanMessage;
 const input = '/Users/me/Movies/standard-16x9.mp4';
@@ -65,7 +69,7 @@ describe('flow', () => {
     s = reduce(s, { type: 'engine', message: { type: 'progress', event: progress('ENCODING_PASS_1', 0.2, 12) } });
     expect(s).toMatchObject({ screen: 'converting', progress: { phase: 'ENCODING_PASS_1' } });
     s = reduce(s, { type: 'engine', message: { type: 'done', result: { outputDir: '/Users/me/Movies/standard-16x9', isoFileName: 'standard-16x9.iso', checks: 45, notMeasured: 1 } } });
-    expect(s).toEqual({ screen: 'complete', input, outputDir: '/Users/me/Movies/standard-16x9', isoFileName: 'standard-16x9.iso', notMeasured: 1 });
+    expect(s).toEqual({ screen: 'complete', input, outputDir: '/Users/me/Movies/standard-16x9', isoFileName: 'standard-16x9.iso', notMeasured: 1, openFailed: false });
     expect(reduce(s, { type: 'reset' })).toEqual(initialState);
   });
 
@@ -162,12 +166,20 @@ describe('screens', () => {
   });
 
   test('complete: software verification, the files, Open Output Folder; no burn guide without a URL', () => {
-    const t = text(render(<Complete outputDir="/Users/me/Movies/standard-16x9" isoFileName="standard-16x9.iso" notMeasured={0} onOpen={noop} onGuide={noop} onAnother={noop} />));
+    const t = text(render(<Complete outputDir="/Users/me/Movies/standard-16x9" isoFileName="standard-16x9.iso" notMeasured={0} openFailed={false} onOpen={noop} onGuide={noop} onAnother={noop} />));
     expect(t).toContain('Software verification passed.');
     expect(t).toContain('VIDEO_TS/ VIDEO_TS.zip standard-16x9.iso');
     expect(t).toContain('Open Output Folder');
     expect(t).toContain('Convert Another');
     expect(t).not.toContain('How to Burn a DVD');
+    expect(t).not.toContain('Could not open');
+  });
+
+  test('complete: a failed Open Output Folder is shown, in both languages', () => {
+    const props = { outputDir: '/o/m', isoFileName: 'm.iso', notMeasured: 0, openFailed: true, onOpen: noop, onGuide: noop, onAnother: noop };
+    const en = render(<Complete {...props} />);
+    expect(en).toContain('<p class="error-text" role="alert">Could not open the output folder.</p>');
+    expect(render(<Complete {...props} />, 'ja')).toContain('出力フォルダを開けませんでした。');
   });
 
   test('failed: plain message, Copy Error Details, no report details on screen, no Report Issue without a URL', () => {
@@ -185,10 +197,52 @@ describe('screens', () => {
     for (const part of ['言語', 'バージョン', '0.1.0', 'アップデートを確認', 'オープンソースライセンス', '閉じる']) expect(text(html)).toContain(part);
   });
 
+  test('updates: not available in this build (a release build is not a development build)', () => {
+    expect(config.updatesEnabled).toBe(false);
+    expect(en['settings.updatesUnavailable']).toBe('Update checking is not available in this build.');
+    expect(ja['settings.updatesUnavailable']).toBe('このビルドでは、アップデートの確認は利用できません。');
+  });
+
   test('app: starts on the home screen in the macOS language', () => {
     const bridge = new Proxy({}, { get: () => () => new Promise(() => {}) }) as Bridge;
     expect(text(renderToStaticMarkup(<App bridge={bridge} languages={['ja-JP', 'en-US']} />))).toContain('MP4 から DVD-Video のファイルを作成します。');
     expect(text(renderToStaticMarkup(<App bridge={bridge} languages={['fr-FR']} />))).toContain('Create DVD-Video files from an MP4.');
+  });
+});
+
+describe('open output folder', () => {
+  const complete: State = { screen: 'complete', input, outputDir: '/o/m', isoFileName: 'm.iso', notMeasured: 0, openFailed: false };
+
+  test('the web view passes no path: the backend opens the verified output folder', async () => {
+    expectTypeOf<Bridge['openOutputFolder']>().parameters.toEqualTypeOf<[]>();
+    const bridge = await tauriBridge();
+    await bridge.openOutputFolder();
+    expect(invoke.mock.calls).toEqual([['open_output_folder']]);
+  });
+
+  test('a failure is kept on the complete screen until it works', () => {
+    const failed = reduce(complete, { type: 'opened', ok: false });
+    expect(failed).toEqual({ ...complete, openFailed: true });
+    expect(reduce(failed, { type: 'opened', ok: true })).toEqual(complete);
+    expect(reduce(initialState, { type: 'opened', ok: false })).toBe(initialState);
+  });
+
+  test('capabilities: the web view cannot open paths, and only the configured URLs', () => {
+    const capabilities = JSON.parse(fs.readFileSync(new URL('../../src-tauri/capabilities/default.json', import.meta.url), 'utf8')) as {
+      permissions: (string | { identifier: string; allow?: { url?: string }[] })[];
+    };
+    const opener = capabilities.permissions.filter((p) => (typeof p === 'string' ? p : p.identifier).startsWith('opener:'));
+    const urls = [config.burnGuideUrl, config.reportIssueUrl].filter((u): u is string => u !== null);
+    for (const p of opener) {
+      // Only URL permissions, each scoped to exact https URLs from config (no wildcards, no paths).
+      expect(typeof p === 'string' ? p : p.identifier).toBe('opener:allow-open-url');
+      expect(typeof p).toBe('object');
+      for (const entry of (p as { allow?: { url?: string }[] }).allow ?? []) {
+        expect(urls).toContain(entry.url);
+        expect(entry.url).toMatch(/^https:\/\/[^*]+$/);
+      }
+    }
+    if (urls.length === 0) expect(opener).toEqual([]);
   });
 });
 
