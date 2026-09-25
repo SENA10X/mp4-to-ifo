@@ -34,7 +34,7 @@ export LDFLAGS="-arch arm64 -mmacosx-version-min=$MACOS_MIN"
 export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 export PKG_CONFIG_PATH=""
 
-mkdir -p "$WORK/src" "$PREFIX" "$BIN" "$LICENSES" "$INFO"
+mkdir -p "$WORK/src" "$PREFIX/bin" "$BIN" "$LICENSES" "$INFO"
 fetch() { # url file
   [ -f "$WORK/src/$2" ] || curl -fsSL "$1" -o "$WORK/src/$2"
   shasum -a 256 "$WORK/src/$2" | cut -d' ' -f1
