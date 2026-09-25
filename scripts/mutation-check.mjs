@@ -1,6 +1,6 @@
-// Mutation check for the verification fixes (Phase 5.1 / 5.2): each mutation turns one fix off in a
-// copy of packages/core, and the named tests must then fail. A mutation that leaves them passing
-// means the tests no longer guard that fix.
+// Mutation check for the verification fixes (Phase 5.1 / 5.2, Beta Hardening): each mutation turns
+// one fix off in a copy of packages/core, and the named tests must then fail. A mutation that leaves
+// them passing means the tests no longer guard that fix.
 //
 //   node scripts/mutation-check.mjs            all mutations (a few minutes)
 //   node scripts/mutation-check.mjs H3 M5      only those whose id starts with H3 or M5
@@ -18,6 +18,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hardening = 'test/integration/verify-hardening.test.ts';
 const robustness = 'test/integration/verify-robustness.test.ts';
 const unit = 'test/unit/verify.test.ts';
+const pipeline = 'test/integration/pipeline.test.ts';
 
 /** id, what is turned off, file, exact text (must occur once), replacement, tests, test name pattern. */
 const MUTATIONS = [
@@ -68,6 +69,8 @@ const MUTATIONS = [
   ['M7', 'windows pooled only (a local fault is averaged away)', 'src/verify/index.ts',
     '  const fieldTemporal = judgeFields(pictures.stats, capacityHz, pictures.windows);', '  const fieldTemporal = judgeFields(pictures.stats, capacityHz);',
     [robustness], 'M7'],
+  ['BH-M4', 'final ISO size not judged against the disc', 'src/verify/index.ts',
+    '    ok: margin >= 0,', '    ok: true,', [unit, pipeline], 'ISO capacity|single-layer DVD'],
 ];
 
 const only = process.argv.slice(2);

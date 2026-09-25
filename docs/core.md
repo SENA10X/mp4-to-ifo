@@ -244,7 +244,7 @@ Phase 2 の 39 項目を移植し（一部は統合・分割）、A/V 同期、V
 | Duration | `duration.video` `duration.audio` `duration.ifo`（±0.15 s。音声は +1 AC-3 フレーム） |
 | Timing / fields | `sync.video_timeline` `sync.audio_timing` `sync.av_offset` `video.field_temporal` |
 | ZIP | `zip.structure` `zip.entries` `zip.crc` `zip.content` |
-| ISO | `iso.volume_id` `iso.bridge` `iso.udf_102` `iso.structure` `iso.file_order` `iso.ifo_addresses` `iso.content` `iso.mount` `iso.mount_udf` `iso.mount_files` `iso.mount_vob_readable` |
+| ISO | `iso.capacity` `iso.volume_id` `iso.bridge` `iso.udf_102` `iso.structure` `iso.file_order` `iso.ifo_addresses` `iso.content` `iso.mount` `iso.mount_udf` `iso.mount_files` `iso.mount_vob_readable` |
 | Source | `source.unchanged` |
 
 ### 判定の状態
@@ -266,6 +266,7 @@ Phase 2 の 39 項目を移植し（一部は統合・分割）、A/V 同期、V
 - **Full decode** は `ffprobe -count_frames -count_packets -err_detect crccheck`（`ffmpeg -f null` は正常な DVD でも誤検出するため使わない）。
 - **`mpeg2.frame_rate`**（M1、M5）: フレームレートは MPEG-2 の sequence header（すべての header の `frame_rate_code` が 4 = 30000/1001、**すべての** sequence extension の `frame_rate_extension` が 0/0、extension の数が header の数と一致）で判定し（Phase 5.1 までは最初の extension だけを見ていた）、VOB の picture start code の数がデコードしたフレーム数と一致することを確認する。ffprobe の `r_frame_rate` は先頭のタイムスタンプからの推定で、1〜2 枚の VOB では `60000/1001` になるため、判定に使わない（detail に参考として出す）。`streams.video` はコーデック・720×480・SAR・DAR だけを見る。
 - **`streams.audio`**（M2）: ffprobe が列挙しただけでパケットを持たないストリーム（ペイロードのない PES ヘッダ。ffprobe は `mp2, 0 ch, 0 packets` と表示する）は数えない（detail に「ignored」として出す）。そのうえで、VOB の PES を走査し、ペイロードを持つ音声ストリームが private stream 1 の `0x80`（AC-3）ただ 1 つであることを確認する。ffprobe（パケット）と PES の走査の両方が一致しなければ失敗。2 本の実ストリーム、音声パケットの欠落はどちらも失敗する。
+- **`iso.capacity`**（Beta Hardening、M-4）: 書き出した ISO ファイルのバイト数が DVD+R SL（`DVD_PLUS_R_SL_BYTES` = 4,700,372,992 B、2 種類の片面 1 層のうち小さいほう）以下であること。plan の見積もり（ビットレートを決めた根拠）ではなく、実際のファイルで判定する。超えれば `VERIFY_ERROR`（終了コード 3）で、ほかの検証の失敗と同じく出力は残らない。
 - **ISO** は `iso/reader.ts` で読み戻す。全記述子のタグのチェックサム・CRC・位置、AVDP 2 つ、メインと予備の VDS の一致、UDF 1.02 のドメインとリビジョン、ISO 9660 のパステーブル（L/M）、ISO 9660 と UDF が同じ extent を指すこと、ファイル配置が IFO のアドレスどおりであること、ISO 内のファイル内容の sha256。
 - **Mount** は macOS の platform adapter（`hdiutil attach -readonly`）。マウントできない環境では `unmeasurable`。
 - **Source**: 本番では `size + mtime + inode + 先頭/末尾 4 MiB の sha256` で照合する（全体のハッシュは大きなファイルで重いため）。統合テストでは全体の sha256 でも確認している。

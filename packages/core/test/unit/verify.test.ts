@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import {
   MAX_BACKWARD_RATIO, MIN_FIELD_COVERAGE, addFieldStats, analyseFields, displayFields, judgeFields, temporalCapacity, type FieldPair, type OutputField,
 } from '../../src/verify/fields.ts';
-import { carrying, judgeAudioStreams } from '../../src/verify/index.ts';
+import { DVD_PLUS_R_SL_BYTES } from '../../src/capacity.ts';
+import { carrying, judgeAudioStreams, judgeIsoCapacity } from '../../src/verify/index.ts';
 import { matchAudio } from '../../src/verify/sync.ts';
 
 const PIXELS = 64 * 48;
@@ -212,4 +213,13 @@ test('audio timing: unique peaks are measured; periodic sound and silence are no
   const pulses = (n: number, offset: number) => at(n, Array.from({ length: Math.floor((n - 200) / 1600) }, (_, k) => offset + k * 1600));
   assert.equal(matchAudio(pulses(3 * rate, 0), 0, pulses(2 * rate, 800), 0.5), null);
   assert.equal(matchAudio(src, 0, new Float32Array(2 * rate), 0.5), null);
+});
+
+test('ISO capacity: the written ISO must fit the smaller single-layer disc (DVD+R SL), to the byte', () => {
+  assert.equal(judgeIsoCapacity(DVD_PLUS_R_SL_BYTES - 1).ok, true);
+  assert.equal(judgeIsoCapacity(DVD_PLUS_R_SL_BYTES).ok, true);
+  assert.equal(judgeIsoCapacity(DVD_PLUS_R_SL_BYTES + 1).ok, false);
+  assert.equal(judgeIsoCapacity(DVD_PLUS_R_SL_BYTES + 2048).ok, false);
+  assert.equal(judgeIsoCapacity(null).ok, false);
+  assert.match(judgeIsoCapacity(DVD_PLUS_R_SL_BYTES + 1).detail, /1 bytes over/);
 });

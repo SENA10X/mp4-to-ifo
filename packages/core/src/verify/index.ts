@@ -3,6 +3,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { DVD_PLUS_R_SL_BYTES } from '../capacity.ts';
 import { ConversionError, throwIfAborted } from '../errors.ts';
 import { readVideoTs, type VideoTsLayout } from '../dvd/layout.ts';
 import { SECTOR } from '../dvd/ifo.ts';
@@ -282,6 +283,8 @@ export async function verifyOutput(input: VerifyInput): Promise<VerificationRepo
   progress(0.65);
 
   // --- ISO --------------------------------------------------------------------------------
+  const capacity = judgeIsoCapacity(fs.existsSync(isoPath) ? fs.statSync(isoPath).size : null);
+  check('iso.capacity', capacity.ok, capacity.detail);
   try {
     const iso = inspectIso(isoPath);
     check('iso.volume_id', iso.iso9660?.volumeId === plan.output.volumeLabel && iso.udf?.volumeId === plan.output.volumeLabel,
@@ -349,6 +352,19 @@ export async function verifyOutput(input: VerifyInput): Promise<VerificationRepo
     audioTiming,
     relativeAvTiming,
     fieldTemporal,
+  };
+}
+
+/**
+ * The ISO that was written must fit the smaller single-layer disc (DVD+R SL). Judged on the file's
+ * bytes: the plan's estimate is what the bitrate was chosen from, not evidence of what came out.
+ */
+export function judgeIsoCapacity(bytes: number | null): { ok: boolean; detail: string } {
+  if (bytes === null) return { ok: false, detail: 'no ISO' };
+  const margin = DVD_PLUS_R_SL_BYTES - bytes;
+  return {
+    ok: margin >= 0,
+    detail: `${bytes} of ${DVD_PLUS_R_SL_BYTES} bytes (DVD+R SL), ${margin >= 0 ? `${margin} bytes free` : `${-margin} bytes over`}`,
   };
 }
 

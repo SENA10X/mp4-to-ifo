@@ -3,6 +3,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { DVD_PLUS_R_SL_BYTES } from '../../src/capacity.ts';
 import { ConversionError } from '../../src/errors.ts';
 import { cleanupStaleJobs, convert, type ConversionResult } from '../../src/job.ts';
 import { defaultPlatform } from '../../src/platform.ts';
@@ -167,7 +168,9 @@ describe('fault injection: verification detects damaged output', { skip: skipNoT
   };
 
   test('undamaged copy passes', async () => {
-    assert.equal((await damaged('none', () => {})).passed, true);
+    const r = await damaged('none', () => {});
+    assert.equal(r.passed, true);
+    assert.equal(r.checks.find((c) => c.id === 'iso.capacity')?.status, 'passed');
   });
   test('corrupted VOB', async () => {
     const r = await damaged('vob', (d) => patch(path.join(d, 'VIDEO_TS/VTS_01_1.VOB'), 400_000, Buffer.alloc(200_000, 0x55)));
@@ -198,6 +201,17 @@ describe('fault injection: verification detects damaged output', { skip: skipNoT
       patch(f, fs.statSync(f).size - 2048 * 10, Buffer.alloc(512, 0x11));
     });
     assert.ok(r.failed.includes('iso.content'), r.failed.join(','));
+  });
+  test('ISO larger than a single-layer DVD (the written file, not the plan)', async () => {
+    // Sparse: the file is extended without writing 4.7 GB. Other ISO checks may fail too; this one must.
+    for (const [bytes, fails] of [[DVD_PLUS_R_SL_BYTES, false], [DVD_PLUS_R_SL_BYTES + 2048, true]] as const) {
+      const dir = path.join(work, `fault-capacity-${bytes}`);
+      fs.cpSync(good.outputDir, dir, { recursive: true });
+      fs.truncateSync(path.join(dir, good.plan.output.isoFileName), bytes);
+      const r = await verifyOutput({ plan: good.plan, dir, toolchain: toolchain! });
+      assert.equal(r.failed.includes('iso.capacity'), fails, `${bytes}: ${r.failed.join(',')}`);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
   test('ZIP data damaged', async () => {
     const r = await damaged('zip', (d) => patch(path.join(d, 'VIDEO_TS.zip'), 50_000, Buffer.from([0x00, 0x01, 0x02])));
