@@ -250,3 +250,14 @@ Developer ID の証明書がなかった時点の確認（PARTIAL）。ad-hoc �
 | Settings | 「このビルドでは、アップデートの確認は利用できません。」 |
 | 通知 | **未確認。** 画面収録の権限がなく、Notification Center の表示を確認できなかった。署名なしの同じビルドでも Notification Center への登録が見られず、署名とは関係のない既存の問題の可能性がある（通知は非推奨の NSUserNotification を使う `mac-notification-sys` 経由）。音は指定していない |
 | Size | .app 155 MiB（`du`。node 112.3 MB、ffmpeg 21.1 MB、ffprobe 21.0 MB、app 6.2 MB、dvdauthor 0.2 MB）、DMG 60,095,808 bytes（test build） |
+
+### 13.3 Beta Hardening の確認（2026-09-25）
+
+Phase 6 の DMG は公開に使わない（中の `third-party-sources.tar.gz` が `ab702bc` より前の `build-toolchain.sh` を含むため）。以下は Beta Hardening の変更後のコアと、同梱と同じ ffmpeg / ffprobe / dvdauthor（`src-tauri/binaries`）で CLI を実行した結果。
+
+| 項目 | 結果 |
+| --- | --- |
+| 通知 | **配信・表示を確認（ログ）、目視は未確認。** /Applications の Phase 6 アプリで変換を始め、Finder を前面にした状態で完了。`usernoted` が `io.github.sena10x.mp4-to-ifo` の通知を受け取り、Delivering → Presenting、NotificationCenter が「Setting visible banner」、おやすみモードの抑制なし、「Not playing sound」（音なし）。コードの変更は不要だった。Phase 6 で見ていた `com.apple.ncprefs` の一覧には、送信後も現れない（登録の有無は表示の可否と関係しなかった）。画面の目視と「失敗」の通知は未確認 |
+| 容量上限に近い ISO | 80 分・ノイズの合成素材（854×480、ソース 7.3 GB）: 計画 7,187 kbps、VIDEO_TS 4,545,230,848 B（VOB 5 本: 1,073,709,056 × 4 + 250,284,032）、ISO 4,545,857,536 B（DVD+R SL まで 154,515,456 B）。検証 49/49 合格（`iso.capacity`、macOS の UDF マウントを含む）、長さ 4800.029 s。独立に: `isoinfo`（ISO 9660）、`hdiutil` の読み取り専用マウント（UDF、全ファイルの sha256 一致）、マウントした VOB の長さ 4800.03 s。変換 15 分 27 秒（M1 Mac、検証 108.5 s） |
+| 容量超過（故障注入） | 同じ素材で最終エンコードだけ 9,000 kbps にする ffmpeg のラッパー: ISO 5,646,632,960 B → `VERIFY_ERROR`（失敗は `iso.capacity` だけ）、CLI の終了コード 3、出力フォルダと作業フォルダは空 |
+| 4 GB を超える ZIP | 上の実出力: 4,545,232,102 B、Zip64 の EOCD（中央ディレクトリの位置が 4 GiB を超える）。`unzip -t`、Python `zipfile`、`ditto -x -k`、Archive Utility で展開し全ファイルの sha256 一致。5 本目の VOB の位置は 4,294,947,263（4 GiB の直前）で、エントリ単位の Zip64 は使われなかったため、同じ VOB に 6 本目を加えた 5,618,941,288 B の ZIP（Core の `writeZip`、6 本目の位置 4,545,231,346）でも確認: Core の `readZip`、`unzip -t`、Python（Zip64 extra 0x0001）、`ditto`、Archive Utility がすべて一致。Windows での展開は未確認 |
