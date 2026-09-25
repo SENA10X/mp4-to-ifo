@@ -261,3 +261,24 @@ Phase 6 の DMG は公開に使わない（中の `third-party-sources.tar.gz` �
 | 容量上限に近い ISO | 80 分・ノイズの合成素材（854×480、ソース 7.3 GB）: 計画 7,187 kbps、VIDEO_TS 4,545,230,848 B（VOB 5 本: 1,073,709,056 × 4 + 250,284,032）、ISO 4,545,857,536 B（DVD+R SL まで 154,515,456 B）。検証 49/49 合格（`iso.capacity`、macOS の UDF マウントを含む）、長さ 4800.029 s。独立に: `isoinfo`（ISO 9660）、`hdiutil` の読み取り専用マウント（UDF、全ファイルの sha256 一致）、マウントした VOB の長さ 4800.03 s。変換 15 分 27 秒（M1 Mac、検証 108.5 s） |
 | 容量超過（故障注入） | 同じ素材で最終エンコードだけ 9,000 kbps にする ffmpeg のラッパー: ISO 5,646,632,960 B → `VERIFY_ERROR`（失敗は `iso.capacity` だけ）、CLI の終了コード 3、出力フォルダと作業フォルダは空 |
 | 4 GB を超える ZIP | 上の実出力: 4,545,232,102 B、Zip64 の EOCD（中央ディレクトリの位置が 4 GiB を超える）。`unzip -t`、Python `zipfile`、`ditto -x -k`、Archive Utility で展開し全ファイルの sha256 一致。5 本目の VOB の位置は 4,294,947,263（4 GiB の直前）で、エントリ単位の Zip64 は使われなかったため、同じ VOB に 6 本目を加えた 5,618,941,288 B の ZIP（Core の `writeZip`、6 本目の位置 4,545,231,346）でも確認: Core の `readZip`、`unzip -t`、Python（Zip64 extra 0x0001）、`ditto`、Archive Utility がすべて一致。Windows での展開は未確認 |
+
+### 13.4 Beta Hardening Release Candidate（2026-09-26、commit `a67619b`）
+
+**Status: PASS**。Phase 6 の DMG は使っていない。Beta Hardening の変更（M-4、BH-H1、M-3、M-2、M-5、BH-H2）を含むクリーンな `a67619b` から `npm run release:mac` で作り直した。
+
+| 項目 | 結果 |
+| --- | --- |
+| Pipeline | clean → tests（CLI 38、core 187、desktop UI 33、engine 13、Rust 1: 失敗・スキップ 0）→ typecheck → build → license inventory → .app → 署名 → 公証 → staple → DMG → 公証 → staple → sources archive → metadata → 最終検証、すべて通過 |
+| Signed .app（公証前、`MP4_TO_IFO_SIGN_ONLY=1`） | MP4 を選択 → Plan → 変換 → 検証合格 → 出力フォルダを開く（BH-H2 の素材: 保持フレームのある VFR） |
+| 公証 | app `d939518a-b5f9-4e5f-9095-2c3936cf5e92` Accepted、DMG `822d596e-4fd3-41b6-a97f-5cadf5a73079` Accepted、どちらも issues なし。staple と validate 成功 |
+| DMG | `MP4-to-IFO-0.1.0-arm64.dmg`、60,109,536 B、SHA-256 `b36b72b236ec155b5d2f76609da620954a89d9e691a83b8bac4c08e5af1cc8fe`。`release.json`（source `a67619b`、clean）と `SHA256SUMS` は新しい成果物から生成 |
+| Gatekeeper | DMG と app: accepted、`source=Notarized Developer ID` |
+| Quarantine | Safari と同じ quarantine を付けた DMG → マウント → /Applications（`ditto`）→ 起動:「インターネットからダウンロードされたアプリケーションです…Appleによるチェックで悪質なソフトウェアは検出されませんでした」→「開く」 |
+| Installed app | 変換と検証合格、出力フォルダを開く（成功・フォルダを移動したときの表示・戻したあと）、キャンセル（確認 → 出力・子プロセス・作業フォルダ・スリープ抑止なし）、変換中の Cmd+Q →「キャンセルして終了」（約 3 秒で終了、何も残らない）、Settings（「このビルドでは、アップデートの確認は利用できません。」）、Open Source Licenses（同梱の 8 ファイル） |
+| 通知 | **VERIFIED（ユーザーが画面で確認）。** 別のアプリを前面にして、成功（通常の変換）と失敗（59.94 fps の 1 フレーム: DVD の構造を作れず失敗、出力なし）の両方の通知が表示され、音は鳴らなかった |
+| Toolchain | 変換中のアプリの子孫は同梱の node・ffmpeg と `caffeinate -i -w` だけ。cdrtools は同梱されず、使われない |
+| Third-party sources | 新しい archive の `build-toolchain.sh`・`sources.json`・`toolchain.txt`・ライセンスは `a67619b` と同一（Phase 6 の古い `build-toolchain.sh` の問題は解消）。tarball の SHA-256 は manifest と一致。現在の `build-toolchain.sh` で toolchain を作り直すと、dvdauthor と node はバイト単位で一致、ffmpeg / ffprobe はリンカが付ける Mach-O の UUID（と、それを含む ad-hoc 署名のページハッシュ）だけが違い、コードとデータは一致 |
+| Privacy | 最終検証: 50 ファイルにホームパス・ユーザー名・一時パス・git の e-mail・秘密鍵なし（node の上流のビルドパス `/Users/admin/` だけ）。release.json・SHA256SUMS・公証ログにも個人情報や認証情報なし |
+| 証明書 | Developer ID Application の有効期限は 2027-02-01。この成果物は timestamp・公証済みで期限後も有効。以降のリリースには新しい証明書が必要 |
+
+**Not physically verified.** Windows での Zip64 展開と、macOS 14 の実機は未確認。
