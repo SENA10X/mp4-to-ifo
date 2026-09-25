@@ -64,6 +64,7 @@ The DVD is NTSC, 16:9, 720×480 MPEG-2 with AC-3 stereo audio, and plays automat
 - One `.mp4` file per conversion
 - Any size and aspect ratio (4:3 and vertical video get black bars; nothing is cropped or stretched), rotated video
 - 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 fps, and variable frame rate
+- Interlaced video (such as 1080i from a camcorder), top or bottom field first: every field is kept, in order
 - Audio: stereo, mono, 5.1 (mixed down to stereo), or none (a silent track is added)
 - HDR10 and HLG: converted to SDR — **experimental**, a warning is shown
 

@@ -60,8 +60,12 @@ const RATE_TOLERANCE = 1.01;
  */
 export const MIN_STRUCTURE = 1;
 
-/** Distinct source moments per second the strategy can deliver (a DVD property, not the generator's mapping). */
-export function temporalCapacity(strategy: FrameRateStrategyId): number {
+/**
+ * Distinct source moments per second the strategy can deliver (a DVD property, not the generator's
+ * mapping). Passing whole frames through carries what the frames hold: two moments each when the source
+ * is interlaced (M-5).
+ */
+export function temporalCapacity(strategy: FrameRateStrategyId, interlacedSource = false): number {
   switch (strategy) {
     case 'interlace-60i':
       return 60000 / 1001; // one moment per field
@@ -69,9 +73,21 @@ export function temporalCapacity(strategy: FrameRateStrategyId): number {
       return 24000 / 1001; // film frames spread over 3:2 fields
     case 'passthrough-29.97':
     case 'decimate-30':
+      return interlacedSource ? 60000 / 1001 : 30000 / 1001;
     case 'progressive-29.97':
       return 30000 / 1001; // both fields from one moment
   }
+}
+
+/**
+ * Whether the source's frames are interlaced (their two fields are different moments), from the first
+ * decoded frames' own flags. The verifier's own probe; the analysis decides the same thing separately.
+ */
+export async function isInterlacedSource(tc: Toolchain, file: string, videoIndex: number, signal?: AbortSignal): Promise<boolean> {
+  const r = await runTool(tc.ffprobe, ['-v', 'error', '-select_streams', String(videoIndex), '-read_intervals', '%+#30',
+    '-show_entries', 'frame=interlaced_frame', '-of', 'csv=p=0', file], { errorCode: 'VERIFY_ERROR', signal });
+  const flags = r.stdout.split('\n').map((l) => l.split(',')[0]).filter((x) => x === '0' || x === '1');
+  return flags.length > 0 && 2 * flags.filter((x) => x === '1').length > flags.length;
 }
 
 /**
@@ -483,7 +499,8 @@ async function decodeFieldPairs(tc: Toolchain, input: string, origin: number, ma
 
 export interface FieldMeasureInput {
   toolchain: Toolchain;
-  source: { path: string; origin: number; videoIndex: number; duration: number; colorMatrix: 'bt709' | 'bt601' };
+  /** interlaced: compare with the source's fields, each at its own time (isInterlacedSource). */
+  source: { path: string; origin: number; videoIndex: number; duration: number; colorMatrix: 'bt709' | 'bt601'; interlaced: boolean };
   output: { input: string; origin: number; active: ActiveArea };
   /** Window centres (seconds), the same deterministic positions as the sync measurement. */
   windows: number[];
@@ -497,7 +514,8 @@ export async function measureFields(input: FieldMeasureInput): Promise<FieldAnal
   // The source is brought to the active area in its own step: a single 1920 -> 64 area scale (with the
   // colour conversion) blurred fine detail differently from the output and hid the motion. Then both
   // sides are narrowed to 64 columns; the lines, and so the field parity, stay.
-  const sourcePrefix = `scale=${a.width}:${a.height}:flags=area:in_color_matrix=${source.colorMatrix}:out_color_matrix=bt601,scale=${W}:${a.height}:flags=area`;
+  const fields = source.interlaced ? 'separatefields,' : '';
+  const sourcePrefix = `${fields}scale=${a.width}:${a.height}:flags=area:in_color_matrix=${source.colorMatrix}:out_color_matrix=bt601,scale=${W}:${a.height}:flags=area`;
   const outputPrefix = `crop=${a.width}:${a.height}:${a.x}:${a.y},scale=${W}:${a.height}:flags=area`;
   let stats = emptyFieldStats();
   const changes: ChangePoint[] = [];

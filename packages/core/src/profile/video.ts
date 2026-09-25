@@ -98,9 +98,18 @@ export function planVideo(video: VideoInfo, frameRate: FrameRateDecision, bitrat
   const hdr = planHdr(video.hdr);
   const tonemapped = hdr.strategy === 'tonemap-experimental';
   const matrix = tonemapped ? 'bt709' : inputColorMatrix(video);
+  // Interlaced input (M-5): the two fields of a frame are different moments. The 29.97/30 strategies
+  // pass whole frames, so they keep the fields: each field is scaled on its own and the first one goes
+  // on top (the DVD is top field first). The others build their output from moments, so the fields
+  // become frames first, one per field. Progressive and unknown input are unchanged.
+  const interlaced = video.scan === 'tff' || video.scan === 'bff';
+  const keepsFields = interlaced && (frameRate.strategy === 'passthrough-29.97' || frameRate.strategy === 'decimate-30');
   const filter = [
+    interlaced && !keepsFields ? 'estdif=mode=field:parity=auto:deint=all' : null,
     tonemapped ? TONEMAP_FILTER : null,
-    `scale=${active.width}:${active.height}:in_color_matrix=${matrix}:out_color_matrix=bt601:out_range=tv:flags=lanczos`,
+    // Moving the first field to the top shifts the picture by one line: at the source's resolution.
+    keepsFields && video.scan === 'bff' ? 'fieldorder=tff' : null,
+    `scale=${active.width}:${active.height}:in_color_matrix=${matrix}:out_color_matrix=bt601:out_range=tv:flags=lanczos${keepsFields ? ':interl=1' : ''}`,
     `pad=${DVD_WIDTH}:${DVD_HEIGHT}:${active.x}:${active.y}:black`,
     // The fps filter ends the stream at the last frame's start and drops that frame; holding the
     // last frame for one source frame duration keeps it (verified for every strategy).

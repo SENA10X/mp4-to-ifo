@@ -103,3 +103,55 @@ export function probeMotion(source: string, sourceSize: [number, number], vobCon
     avSyncMs: audioOffsets.length ? (median(audioOffsets) - videoOffset) * 1000 : null,
   };
 }
+
+export interface FieldSequence {
+  fields: number;
+  /** Consecutive fields whose code goes up by exactly one, stays, or goes back. */
+  next: number;
+  repeats: number;
+  backwards: number;
+  /** Fields with a code box neither black nor white: two moments mixed in one field. */
+  blended: number;
+  distinct: number;
+}
+
+/**
+ * The fields of a DVD made from an interlaced motion sample (makeSample `interlaced`), each read on its
+ * own lines, in display order from each frame's own field flag. Independent of the core: no plan, no
+ * verification code.
+ */
+export function fieldSequence(vobConcat: string, active: { width: number; x: number }): FieldSequence {
+  const r = spawnSync(toolchain!.ffmpeg, ['-v', 'info', '-i', vobConcat, '-map', '0:v:0', '-vf', 'showinfo', '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { maxBuffer: 2 ** 31 });
+  const flags = [...r.stderr.toString().matchAll(/Parsed_showinfo.*? i:([TBP])/g)].map((m) => m[1]);
+  const W = 720;
+  const frame = W * 480;
+  const box = active.width / 12;
+  const codes: number[] = [];
+  let blended = 0;
+  for (let k = 0; (k + 1) * frame <= r.stdout.length; k++) {
+    for (const parity of flags[k] === 'B' ? [1, 0] : [0, 1]) {
+      let code = 0;
+      let mixed = false;
+      for (let i = 0; i < 12; i++) {
+        const x = Math.round(active.x + (i + 0.5) * box);
+        let sum = 0;
+        let n = 0;
+        for (let y = 60 + parity; y < 420; y += 2, n++) sum += r.stdout[k * frame + y * W + x] ?? 0;
+        const v = sum / n;
+        if (v > 60 && v < 190) mixed = true;
+        if (v > 128) code |= 1 << i;
+      }
+      if (mixed) blended++;
+      codes.push(code);
+    }
+  }
+  const steps = codes.slice(1).map((c, i) => c - (codes[i] ?? 0));
+  return {
+    fields: codes.length,
+    next: steps.filter((d) => d === 1).length,
+    repeats: steps.filter((d) => d === 0).length,
+    backwards: steps.filter((d) => d < 0).length,
+    blended,
+    distinct: new Set(codes).size,
+  };
+}

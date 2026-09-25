@@ -97,11 +97,13 @@ const nearest = (x: number) => Math.sign(x) * Math.round(Math.abs(x));
  * When a source moment at `sourceTime` (seconds on the timeline) first appears in the output, for a
  * correct conversion with this strategy. Verification compares measured display times against this,
  * so the inherent drift of 30 -> 29.97 or the 3:2 cadence is not mistaken for an A/V offset.
+ * `interlacedSource`: the moments are the source's fields; passed-through frames show each in its own field.
  */
-export function expectedDisplayTime(strategy: FrameRateStrategyId, sourceTime: number): number {
+export function expectedDisplayTime(strategy: FrameRateStrategyId, sourceTime: number, interlacedSource = false): number {
   switch (strategy) {
     case 'passthrough-29.97':
     case 'decimate-30':
+      return interlacedSource ? nearest(sourceTime / FIELD) * FIELD : nearest(sourceTime / FRAME) * FRAME;
     case 'progressive-29.97':
       return nearest(sourceTime / FRAME) * FRAME;
     case 'interlace-60i':

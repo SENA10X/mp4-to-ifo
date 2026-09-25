@@ -60,6 +60,8 @@ export interface VideoInfo {
   frameCount: number | null;
   pixelFormat: string | null;
   fieldOrder: string | null;
+  /** Progressive or interlaced, and which field comes first (see scanOf). */
+  scan: Scan;
   color: ColorInfo;
   rotation: number;
   hdr: HdrInfo;
@@ -151,6 +153,22 @@ export function classifyHdr(stream: ProbeStream): HdrInfo {
  * Variable frame rate: r_frame_rate and avg_frame_rate disagree, or packet durations spread.
  * CFR streams in coarse time bases alternate by one tick (e.g. 512/513), well under 5%.
  */
+export type Scan = 'progressive' | 'tff' | 'bff' | 'unknown';
+
+/**
+ * Scan from the first decoded frames' own flags (what the filters and the encoder see); the stream's
+ * field_order only when no frame could be read. Its tb / bt codes mean the opposite field order in
+ * different demuxers (MPEG-2 and MOV write tb for top field first), so only tt / bb / progressive are used.
+ */
+export function scanOf(frames: { interlaced: boolean; topFirst: boolean }[], fieldOrder: string | null | undefined): Scan {
+  if (frames.length) {
+    const interlaced = frames.filter((f) => f.interlaced);
+    if (2 * interlaced.length <= frames.length) return 'progressive';
+    return 2 * interlaced.filter((f) => f.topFirst).length >= interlaced.length ? 'tff' : 'bff';
+  }
+  return fieldOrder === 'progressive' ? 'progressive' : fieldOrder === 'tt' ? 'tff' : fieldOrder === 'bb' ? 'bff' : 'unknown';
+}
+
 export function detectVariableFrameRate(r: Rational, avg: Rational, packetPts: number[]): boolean {
   const rv = rationalValue(r);
   const av = rationalValue(avg);
@@ -264,6 +282,14 @@ export async function analyzeInput(
       });
     });
 
+  const flags = await runTool(toolchain.ffprobe, ['-v', 'error', '-select_streams', `${v.index}`, '-read_intervals', '%+#30',
+    '-show_entries', 'frame=interlaced_frame,top_field_first', '-of', 'csv=p=0', absolute], run)
+    .then((r) => r.stdout.split('\n').map((l) => l.split(',')).filter((c) => c.length >= 2).map((c) => ({ interlaced: c[0] === '1', topFirst: c[1] === '1' })))
+    .catch((error: unknown) => {
+      if (error instanceof ConversionError && error.code === 'CANCELLED') throw error;
+      return [];
+    });
+
   const startTimes = [v, ...audioStreams].map((s) => numberOrNull(s.start_time)).filter((n): n is number => n !== null);
   return {
     path: absolute,
@@ -288,6 +314,7 @@ export async function analyzeInput(
       frameCount: numberOrNull(v.nb_read_packets) ?? numberOrNull(v.nb_frames),
       pixelFormat: v.pix_fmt ?? null,
       fieldOrder: v.field_order ?? null,
+      scan: scanOf(flags, v.field_order),
       color: {
         space: v.color_space ?? null,
         transfer: v.color_transfer ?? null,

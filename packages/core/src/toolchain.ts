@@ -25,7 +25,7 @@ export interface ToolchainReport {
 
 /** Filters, encoders and muxers the conversion pipeline uses (all LGPL in FFmpeg 7.1). */
 export const REQUIRED_FFMPEG_FEATURES = {
-  filters: ['scale', 'pad', 'tpad', 'fps', 'setsar', 'setfield', 'separatefields', 'select', 'weave', 'telecine', 'format', 'pan', 'volume', 'astats', 'aresample', 'anullsrc', 'showinfo'],
+  filters: ['scale', 'pad', 'tpad', 'fps', 'setsar', 'setfield', 'separatefields', 'select', 'weave', 'telecine', 'fieldorder', 'estdif', 'format', 'pan', 'volume', 'astats', 'aresample', 'anullsrc', 'showinfo'],
   encoders: ['mpeg2video', 'ac3'],
   muxers: ['dvd'],
 } as const;

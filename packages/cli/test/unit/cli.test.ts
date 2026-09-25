@@ -18,7 +18,7 @@ function analysis(overrides: Partial<InputAnalysis> = {}): InputAnalysis {
     video: {
       index: 0, codec: 'h264', profile: null, width: 1920, height: 1080, sampleAspectRatio: { num: 1, den: 1 }, displayAspectRatio: 16 / 9,
       frameRate: 60000 / 1001, rFrameRate: { num: 60000, den: 1001 }, avgFrameRate: { num: 60000, den: 1001 }, isVariableFrameRate: false,
-      frameCount: null, pixelFormat: 'yuv420p', fieldOrder: 'progressive', color: { space: 'bt709', transfer: 'bt709', primaries: 'bt709', range: 'tv' },
+      frameCount: null, pixelFormat: 'yuv420p', fieldOrder: 'progressive', scan: 'progressive', color: { space: 'bt709', transfer: 'bt709', primaries: 'bt709', range: 'tv' },
       rotation: 0, hdr: { kind: 'sdr', dolbyVision: null }, startTime: 0, duration,
     },
     audioTracks: [{ index: 1, codec: 'aac', sampleRate: 48000, channels: 2, channelLayout: 'stereo', default: true, startTime: 0, duration }],

@@ -18,7 +18,7 @@ import { runTool } from '../process.ts';
 import type { Toolchain } from '../toolchain.ts';
 import { readZip } from '../zip.ts';
 import { expectedDisplayTime } from '../profile/frame-rate.ts';
-import { WIDE_SEARCH_SEC, judgeDisplacement, judgeFields, measureFields, temporalCapacity, type FieldTemporalResult } from './fields.ts';
+import { WIDE_SEARCH_SEC, isInterlacedSource, judgeDisplacement, judgeFields, measureFields, temporalCapacity, type FieldTemporalResult } from './fields.ts';
 import { measureSync, syncWindows, type SyncMeasurement } from './sync.ts';
 
 export const DURATION_TOLERANCE_S = 0.15;
@@ -209,10 +209,14 @@ export async function verifyOutput(input: VerifyInput): Promise<VerificationRepo
   throwIfAborted(signal);
   const strategy = plan.video.frameRate.strategy;
   const hasSourceAudio = plan.audio?.strategy !== 'silence' && plan.audio?.sourceIndex != null;
-  const capacityHz = temporalCapacity(strategy);
+  const interlaced = await isInterlacedSource(toolchain, plan.input.path, plan.video.sourceIndex, signal).catch((error: unknown) => {
+    if ((error as ConversionError).code === 'CANCELLED') throw error;
+    return false;
+  });
+  const capacityHz = temporalCapacity(strategy, interlaced);
   const pictures = await measureFields({
     toolchain,
-    source: { path: plan.input.path, origin: plan.input.origin, videoIndex: plan.video.sourceIndex, duration: plan.input.videoEnd, colorMatrix: plan.video.inputColorMatrix },
+    source: { path: plan.input.path, origin: plan.input.origin, videoIndex: plan.video.sourceIndex, duration: plan.input.videoEnd, colorMatrix: plan.video.inputColorMatrix, interlaced },
     output: { input: concat, origin: outOrigin, active: plan.video.active },
     windows: syncWindows(plan.input.videoEnd),
     capacityHz,
@@ -230,7 +234,7 @@ export async function verifyOutput(input: VerifyInput): Promise<VerificationRepo
     output: { input: concat, origin: outOrigin, videoStart: outVideoStart },
     changes: pictures.changes,
     ambiguous: pictures.ambiguous,
-    expectedDisplayTime: (t) => expectedDisplayTime(strategy, t),
+    expectedDisplayTime: (t) => expectedDisplayTime(strategy, t, interlaced),
     signal,
   });
   const judge = (value: number | null, tolerance: number): CheckStatus => (value === null ? 'unmeasurable' : Math.abs(value) <= tolerance ? 'passed' : 'failed');

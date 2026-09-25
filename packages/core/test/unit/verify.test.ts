@@ -7,6 +7,7 @@ import {
   MAX_BACKWARD_RATIO, MIN_FIELD_COVERAGE, MIN_STRUCTURE, addFieldStats, analyseFields, displayFields, judgeFields, normalise, temporalCapacity, type FieldPair, type OutputField,
 } from '../../src/verify/fields.ts';
 import { DVD_PLUS_R_SL_BYTES } from '../../src/capacity.ts';
+import { expectedDisplayTime } from '../../src/profile/frame-rate.ts';
 import { carrying, judgeAudioStreams, judgeIsoCapacity } from '../../src/verify/index.ts';
 import { matchAudio } from '../../src/verify/sync.ts';
 
@@ -287,4 +288,17 @@ test('M-2: a picture that repeats within the search has no time of its own, only
   }), { seeds: Array.from({ length: 120 }, (_, i) => (i % 24) + 1) });
   const unique = analyseFields(slow, fieldsShowing(slow, 110, (j) => j), 0.2, 1.8, cap60i);
   assert.ok(unique.changes.length > 50 && unique.ambiguous.length === 0);
+});
+
+test('M-5: passing interlaced frames through carries their fields: capacity and display time per field', () => {
+  for (const s of ['passthrough-29.97', 'decimate-30'] as const) {
+    assert.ok(Math.abs(temporalCapacity(s, true) - 60000 / 1001) < 1e-9, s);
+    assert.ok(Math.abs(temporalCapacity(s) - 30000 / 1001) < 1e-9, s);
+    // The second field of a source frame is shown in the second field of the DVD frame.
+    assert.ok(Math.abs(expectedDisplayTime(s, 3 * FIELD, true) - 3 * FIELD) < 1e-9, s);
+    assert.ok(Math.abs(expectedDisplayTime(s, 2 * FIELD, true) - 2 * FIELD) < 1e-9, s);
+  }
+  // Whole-frame output of an interlaced source (progressive policy) still carries one moment per frame.
+  assert.ok(Math.abs(temporalCapacity('progressive-29.97', true) - 30000 / 1001) < 1e-9);
+  assert.ok(Math.abs(temporalCapacity('interlace-60i', true) - temporalCapacity('interlace-60i')) < 1e-9);
 });

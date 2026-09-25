@@ -51,6 +51,12 @@ export interface SampleOptions {
   motion?: boolean;
   /** With `motion`: the pictures repeat every `period` frames (the code of n mod period). */
   period?: number;
+  /**
+   * With `motion`: interlaced frames at `rate` whose fields are motion pictures at twice the rate (each
+   * field its own moment and code), top ('tt') or bottom ('bb') field first. Encoded as interlaced
+   * MPEG-2 video in MP4: the native encoders have no interlaced H.264.
+   */
+  interlaced?: 'tt' | 'bb';
   /** A still picture (SMPTE bars) for the whole clip. */
   still?: boolean;
   /** Exact number of video frames (overrides seconds for the picture; audio lasts as long). */
@@ -78,7 +84,7 @@ export interface SampleOptions {
   videoDelay?: number;
 }
 
-/** Generate an MP4 test sample (MPEG-4 Part 2 video, AAC audio). */
+/** Generate an MP4 test sample (MPEG-4 Part 2 video, or MPEG-2 when interlaced; AAC audio). */
 export function makeSample(file: string, o: SampleOptions = {}): string {
   const [rn, rd] = (o.rate ?? '30000/1001').split('/').map(Number) as [number, number?];
   const seconds = o.frames ? o.frames * (rd ?? 1) / rn : (o.seconds ?? 4);
@@ -98,7 +104,10 @@ export function makeSample(file: string, o: SampleOptions = {}): string {
     const boxW = Math.floor(w / 12);
     const boxes = Array.from({ length: 12 }, (_, i) =>
       `drawbox=x=${i * boxW}:y=0:w=${boxW}:h=${h}:color=white:t=fill:enable='eq(mod(floor(${o.period ? `mod(n,${o.period})` : 'n'}/${2 ** i}),2),1)'`).join(',');
-    video = `color=c=black:s=${size}:r=${pictureRate}:d=${seconds},format=yuv420p,${boxes}${repeat}`;
+    video = `color=c=black:s=${size}:r=${o.interlaced ? `${2 * rn}/${rd ?? 1}` : pictureRate}:d=${seconds},format=yuv420p,${boxes}${repeat}`;
+    // Fields 2n and 2n+1 of the doubled rate make frame n, the earlier one on the first field's lines.
+    if (o.interlaced === 'tt') video += ",setfield=tff,separatefields,select='not(mod(n\\,4))+eq(mod(n\\,4)\\,3)',weave=first_field=top,setfield=tff";
+    if (o.interlaced === 'bb') video += ",setfield=tff,separatefields,select='eq(mod(n\\,4)\\,1)+eq(mod(n\\,4)\\,2)',weave=first_field=bottom,setfield=bff";
   } else if (o.still) {
     video = `smptebars=s=${size}:r=${rate}:d=${seconds}`;
   } else {
@@ -137,7 +146,8 @@ export function makeSample(file: string, o: SampleOptions = {}): string {
   args.push('-map', '0:v');
   if (a) args.push('-map', '1:a');
   if (o.subtitles) args.push('-map', `${a ? 2 : 1}:s`, '-c:s', 'mov_text');
-  args.push('-c:v', 'mpeg4', '-q:v', '3', '-g', '30');
+  if (o.interlaced) args.push('-c:v', 'mpeg2video', '-q:v', '2', '-flags', '+ildct+ilme', '-top', o.interlaced === 'tt' ? '1' : '0', '-g', '30', '-r', rate);
+  else args.push('-c:v', 'mpeg4', '-q:v', '3', '-g', '30');
   if (o.frames) args.push('-frames:v', String(o.frames));
   if (o.vfr) args.push('-fps_mode', 'vfr');
   if (a) args.push('-c:a', 'aac', '-b:a', '256k');

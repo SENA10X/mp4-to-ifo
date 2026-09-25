@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import zlib from 'node:zlib';
-import { classifyHdr, type InputAnalysis } from '../../src/analyze.ts';
+import { classifyHdr, scanOf, type InputAnalysis, type VideoInfo } from '../../src/analyze.ts';
 import { ConversionError, ERROR_CODES, exitCodeFor } from '../../src/errors.ts';
 import { crc16, dstring, finishTag, tagChecksum } from '../../src/iso/encoding.ts';
 import { finalize, nextOutputDirectory } from '../../src/job.ts';
@@ -98,7 +98,7 @@ function analysis(overrides: Partial<InputAnalysis> & { duration?: number } = {}
     video: {
       index: 0, codec: 'h264', profile: null, width: 1920, height: 1080, sampleAspectRatio: { num: 1, den: 1 }, displayAspectRatio: 16 / 9,
       frameRate: 30000 / 1001, rFrameRate: { num: 30000, den: 1001 }, avgFrameRate: { num: 30000, den: 1001 }, isVariableFrameRate: false,
-      frameCount: null, pixelFormat: 'yuv420p', fieldOrder: 'progressive', color: { space: 'bt709', transfer: 'bt709', primaries: 'bt709', range: 'tv' },
+      frameCount: null, pixelFormat: 'yuv420p', fieldOrder: 'progressive', scan: 'progressive', color: { space: 'bt709', transfer: 'bt709', primaries: 'bt709', range: 'tv' },
       rotation: 0, hdr: { kind: 'sdr', dolbyVision: null }, startTime: 0, duration,
     },
     audioTracks: [{ index: 1, codec: 'aac', sampleRate: 48000, channels: 2, channelLayout: 'stereo', default: true, startTime: 0, duration }],
@@ -190,4 +190,32 @@ test('nextOutputDirectory previews the numbered name without creating anything',
   assert.equal(nextOutputDirectory(dir, 'opening'), path.join(dir, 'opening-2'));
   assert.deepEqual(fs.readdirSync(dir), ['opening']);
   fs.rmSync(dir, { recursive: true });
+});
+
+test('M-5: scan from the decoded frames, the stream label only as a fallback', () => {
+  const f = (interlaced: boolean, topFirst: boolean) => ({ interlaced, topFirst });
+  assert.equal(scanOf([f(false, false), f(false, false)], 'tt'), 'progressive', 'frames win over the label');
+  assert.equal(scanOf([f(true, true), f(true, true), f(false, false)], 'progressive'), 'tff');
+  assert.equal(scanOf([f(true, false), f(true, false)], 'tb'), 'bff');
+  assert.equal(scanOf([], 'tt'), 'tff');
+  assert.equal(scanOf([], 'bb'), 'bff');
+  assert.equal(scanOf([], 'progressive'), 'progressive');
+  // tb / bt mean opposite field orders in different demuxers.
+  for (const label of ['tb', 'bt', 'unknown', null, undefined]) assert.equal(scanOf([], label), 'unknown');
+});
+
+test('M-5: interlaced input changes the picture filters only for interlaced input', () => {
+  const plan = (scan: VideoInfo['scan'], frameRate = 30000 / 1001) => {
+    const a = analysis();
+    return planConversion({ ...a, video: { ...a.video, scan, frameRate, avgFrameRate: { num: Math.round(frameRate * 1001), den: 1001 } } }).video.filter;
+  };
+  const progressive = plan('progressive');
+  assert.doesNotMatch(progressive, /interl|fieldorder|estdif/);
+  assert.equal(plan('unknown'), progressive, 'unknown is treated as progressive, as before');
+  // Whole frames passed through: each field scaled on its own; bottom-first moved to the top first.
+  assert.match(plan('tff'), /^scale=[^,]*:interl=1,pad=/);
+  assert.match(plan('bff'), /^fieldorder=tff,scale=[^,]*:interl=1,pad=/);
+  // Strategies that build fields from moments: the fields become frames first.
+  assert.match(plan('tff', 25), /^estdif=mode=field:parity=auto:deint=all,scale=[^,]*flags=lanczos,pad=/);
+  assert.doesNotMatch(plan('bff', 25), /interl|fieldorder/);
 });

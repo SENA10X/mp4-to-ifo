@@ -20,6 +20,7 @@ const robustness = 'test/integration/verify-robustness.test.ts';
 const unit = 'test/unit/verify.test.ts';
 const pipeline = 'test/integration/pipeline.test.ts';
 const range = 'test/integration/verify-timing-range.test.ts';
+const interlaced = 'test/integration/interlaced.test.ts';
 
 /** id, what is turned off, file, exact text (must occur once), replacement, tests, test name pattern. */
 const MUTATIONS = [
@@ -87,6 +88,12 @@ const MUTATIONS = [
     [unit, range], 'M-2'],
   ['BH-M2-b', 'repeating pictures can no longer show that no repeat is on time', 'src/verify/index.ts',
     'sync.videoAmbiguousMs > SYNC_TOLERANCE_MS;', 'sync.videoAmbiguousMs > 1e9;', [range], 'M-2'],
+  ['BH-M5-a', 'bottom-field-first input not moved to top field first', 'src/profile/video.ts',
+    "    keepsFields && video.scan === 'bff' ? 'fieldorder=tff' : null,", '    null,', [interlaced], 'M-5'],
+  ['BH-M5-b', 'interlaced frames scaled as progressive pictures (fields mixed)', 'src/profile/video.ts',
+    "flags=lanczos${keepsFields ? ':interl=1' : ''}`,", 'flags=lanczos`,', [interlaced], 'M-5'],
+  ['BH-M5-c', 'verification compares interlaced sources frame by frame again', 'src/verify/fields.ts',
+    "  const fields = source.interlaced ? 'separatefields,' : '';", "  const fields = '';", [interlaced], 'M-5'],
   ['BH-M4', 'final ISO size not judged against the disc', 'src/verify/index.ts',
     '    ok: margin >= 0,', '    ok: true,', [unit, pipeline], 'ISO capacity|single-layer DVD'],
 ];
