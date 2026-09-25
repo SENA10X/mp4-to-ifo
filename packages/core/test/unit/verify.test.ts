@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  MAX_BACKWARD_RATIO, MIN_FIELD_COVERAGE, MIN_STRUCTURE, addFieldStats, analyseFields, displayFields, judgeFields, normalise, temporalCapacity, type FieldPair, type OutputField,
+  MAX_BACKWARD_RATIO, MIN_FIELD_COVERAGE, MIN_STRUCTURE, addFieldStats, analyseFields, displayEnd, displayFields, judgeDisplacement, judgeFields, normalise, temporalCapacity, type FieldPair, type OutputField,
 } from '../../src/verify/fields.ts';
 import { DVD_PLUS_R_SL_BYTES } from '../../src/capacity.ts';
 import { expectedDisplayTime } from '../../src/profile/frame-rate.ts';
@@ -301,4 +301,34 @@ test('M-5: passing interlaced frames through carries their fields: capacity and 
   // Whole-frame output of an interlaced source (progressive policy) still carries one moment per frame.
   assert.ok(Math.abs(temporalCapacity('progressive-29.97', true) - 30000 / 1001) < 1e-9);
   assert.ok(Math.abs(temporalCapacity('interlace-60i', true) - temporalCapacity('interlace-60i')) < 1e-9);
+});
+
+test('BH-H2: a source frame is shown from its timestamp until the next one; broken timing is never a hold', () => {
+  assert.equal(displayEnd(1, 1.5, 1 / 30), 1.5, 'held until the next frame');
+  assert.equal(displayEnd(1, undefined, 0.8), 1.8, 'last frame decoded: its own duration');
+  assert.equal(displayEnd(1, 0.9, 0.8), 1, 'timestamps going back: a point');
+  assert.equal(displayEnd(1, 1, 0.8), 1, 'same timestamp: a point');
+  assert.equal(displayEnd(1, undefined, null), 1, 'no duration: a point');
+  assert.equal(displayEnd(1, undefined, 0), 1, 'zero duration: a point');
+});
+
+test('BH-H2: fields during a hold show the held frame, on time; the same picture shown after the hold ends is displaced', () => {
+  const fps = 60000 / 1001;
+  // 24 frames, then frame 24 held for a second (the next frame at 1.4 s), then frames again.
+  const times = [...Array.from({ length: 25 }, (_, i) => i / fps), ...Array.from({ length: 30 }, (_, i) => 1.4 + i / fps)];
+  const seeds = times.map((_, i) => i + 1);
+  const src = Object.assign(times.map((t, i) => {
+    const px = unit(seeds[i]!);
+    return { t, duration: 1 / fps, first: 'top' as const, top: px, bottom: px, end: times[i + 1] ?? t + 1 / fps };
+  }), { seeds });
+  const frameAt = (t: number) => times.reduce((k, s, i) => (s <= t + 1e-9 ? i : k), 0);
+  const fields: OutputField[] = Array.from({ length: 110 }, (_, j) => ({ t: j * FIELD, parity: j % 2 ? 'bottom' as const : 'top' as const, px: unit(seeds[frameAt(j * FIELD)]!, 0.02, j) }));
+  const onTime = analyseFields(src, fields, 0.2, 1.6, cap60i);
+  assert.equal(onTime.stats.displaced, 0, 'a hold is not a displacement');
+  assert.equal(onTime.stats.matchedFields, onTime.stats.fields, 'every field matches, including those 0.25-1 s into the hold');
+  assert.equal(judgeDisplacement([onTime.stats], onTime.displaced), null);
+  // The held picture shown 0.4 s after the next frame took over: displaced even though it was held.
+  const late = fields.map((f) => ({ ...f, px: unit(seeds[frameAt(Math.max(0, f.t - 0.4))]!, 0.02, Math.round(f.t * 1000)) }));
+  const shifted = analyseFields(src, late, 0.2, 1.6, cap60i);
+  assert.ok(shifted.stats.displaced >= 12, `${shifted.stats.displaced} displaced`);
 });

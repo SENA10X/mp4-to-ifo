@@ -78,6 +78,11 @@ export interface SampleOptions {
   picture?: string;
   /** Drop frames irregularly and keep timestamps (VFR). */
   vfr?: boolean;
+  /**
+   * Held frames (VFR, timestamps kept): between `from` and `to` seconds only every `every`-th frame is
+   * kept, so each stays on screen until the next one (a large `every` holds one frame for the range).
+   */
+  holds?: readonly { from: number; to: number; every: number }[];
   rotation?: number;
   subtitles?: boolean;
   /** Start the video this many seconds after the audio (e.g. 1/60, as the Phase 2 VFR sample did). */
@@ -120,6 +125,7 @@ export function makeSample(file: string, o: SampleOptions = {}): string {
   }
   if (o.blackout === 'fade') video += ',split[a][b];[a]trim=0:4,fade=t=out:st=2:d=2[x];[b]trim=4,setpts=PTS-STARTPTS,fade=t=in:st=1:d=2[y];[x][y]concat';
   if (o.vfr) video += ",select='not(gte(mod(t\\,3)\\,1)*mod(n\\,2))*not(eq(mod(n*7\\,23)\\,0))'";
+  if (o.holds) video += `,select='${o.holds.map((h) => `(not(between(t\\,${h.from}\\,${h.to}))+not(mod(n\\,${h.every})))`).join('*')}'`;
   const click = "if(lt(mod(t,1),0.02),0.5*sin(2*PI*1000*t),0)";
   const tone = (f: number, a: number) => `${a}*sin(2*PI*${f}*t)`;
   const audioSrc: Record<string, string | null> = {
@@ -149,7 +155,7 @@ export function makeSample(file: string, o: SampleOptions = {}): string {
   if (o.interlaced) args.push('-c:v', 'mpeg2video', '-q:v', '2', '-flags', '+ildct+ilme', '-top', o.interlaced === 'tt' ? '1' : '0', '-g', '30', '-r', rate);
   else args.push('-c:v', 'mpeg4', '-q:v', '3', '-g', '30');
   if (o.frames) args.push('-frames:v', String(o.frames));
-  if (o.vfr) args.push('-fps_mode', 'vfr');
+  if (o.vfr || o.holds) args.push('-fps_mode', 'vfr');
   if (a) args.push('-c:a', 'aac', '-b:a', '256k');
   args.push('-movflags', '+faststart', file);
   ff(args);

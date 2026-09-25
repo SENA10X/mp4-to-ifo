@@ -129,3 +129,49 @@ describe('M-2: a picture that repeats within the search does not tell the time',
     await assert.rejects(convert({ ...base(), input: src, frameRatePolicy: loss }), verifyError(/video\.field_temporal/));
   });
 });
+
+describe('BH-H2: a held VFR frame is on screen until the next one, not only at its timestamp', { skip: skipNoTools }, () => {
+  // Screen recordings and slideshow-like VFR files emit a frame only when the picture changes. M-3
+  // measured the distance to a source frame from its start and called the rest of the hold "displaced".
+  const held = (holds: { from: number; to: number; every: number }[], extra: SampleOptions = {}): SampleOptions =>
+    ({ rate: '30000/1001', motion: true, audio: 'noise', seconds: 8, size: '960x540', holds, ...extra });
+  const LONG = 100_000; // one frame kept for the whole range
+  const correct = [
+    ['held every 15 frames (0.5 s)', held([{ from: 1, to: 7, every: 15 }])],
+    ['held every 30 frames (1 s)', held([{ from: 1, to: 7, every: 30 }])],
+    ['held every 45 frames (1.5 s)', held([{ from: 1, to: 7, every: 45 }])],
+    ['short irregular holds', { rate: '30000/1001', motion: true, audio: 'noise', seconds: 8, size: '960x540', vfr: true }],
+    ['alternating short and long holds', held([0, 1, 2, 3, 4, 5, 6, 7].map((s) => ({ from: s, to: s + 0.5, every: s % 2 ? 2 : 6 })))],
+    ['one frame held for 2.5 s', held([{ from: 2, to: 4.5, every: LONG }])],
+    ['several held sections', held([{ from: 1, to: 2, every: 15 }, { from: 3.5, to: 4.5, every: 30 }, { from: 6, to: 7, every: 45 }])],
+    ['a hold across the end of a sampling window', held([{ from: 3.2, to: 3.9, every: LONG }])],
+  ] as const;
+  for (const [name, o] of correct) {
+    test(`${name}: correct conversion passes`, async () => {
+      const r = await convert({ ...base(), input: makeSample(path.join(work, `bh-h2-${name.replace(/\W+/g, '-')}.mp4`), o) });
+      assert.equal(r.verification.passed, true, `${r.verification.failed.join(',')}: ${r.verification.checks.filter((c) => !c.ok).map((c) => c.detail).join(' | ')}`);
+      assert.notEqual(r.verification.videoTiming.status, 'failed');
+      assert.equal(r.verification.audioTiming.status, 'passed', check(r, 'sync.audio_timing')?.detail);
+    });
+  }
+
+  test('held black, flat and dark structured frames: no evidence from pictures without structure, no false failure', async () => {
+    const cases = [
+      ['held black', held([{ from: 1.5, to: 2.4, every: LONG }, { from: 4.5, to: 5.6, every: LONG }], { blackout: 'cut' })],
+      ['held flat grey', { still: true, audio: 'noise', seconds: 6, picture: 'drawbox=x=0:y=0:w=iw:h=ih:color=gray:t=fill', holds: [{ from: 1, to: 5, every: LONG }] }],
+      ['held dark structured', { rate: '30000/1001', audio: 'noise', seconds: 8, size: '1280x720', picture: 'hue=s=0,lutyuv=y=16+val/20', holds: [{ from: 1, to: 7, every: 30 }] }],
+    ] as const;
+    for (const [name, o] of cases) {
+      const r = await convert({ ...base(), input: makeSample(path.join(work, `bh-h2-${name.replace(/\W+/g, '-')}.mp4`), o) });
+      assert.equal(r.verification.passed, true, `${name}: ${r.verification.failed.join(',')} ${check(r, 'sync.video_timeline')?.detail}`);
+      if (name === 'held flat grey') assert.equal(r.verification.fieldTemporal.stats.fields, 0, 'flat fields are no evidence, however long they are held');
+    }
+  });
+
+  test('held frames and a real timing fault: pictures 400 ms late -> VERIFY_ERROR', async () => {
+    for (const every of [15, 30]) {
+      const src = makeSample(path.join(work, `bh-h2-late-${every}.mp4`), held([{ from: 1, to: 7, every }]));
+      await assert.rejects(convert({ ...base(), input: src, frameRatePolicy: pictureShift(0.4, 8) }), verifyError(/sync\.video_timeline/));
+    }
+  });
+});

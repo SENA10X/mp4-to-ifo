@@ -94,6 +94,11 @@ const MUTATIONS = [
     "flags=lanczos${keepsFields ? ':interl=1' : ''}`,", 'flags=lanczos`,', [interlaced], 'M-5'],
   ['BH-M5-c', 'verification compares interlaced sources frame by frame again', 'src/verify/fields.ts',
     "  const fields = source.interlaced ? 'separatefields,' : '';", "  const fields = '';", [interlaced], 'M-5'],
+  ['BH-H2-a', 'held VFR frames timed from their timestamp only (the rest of the hold looks displaced)', 'src/verify/fields.ts',
+    'const gap = (s: FieldPair, t: number) => Math.max(0, s.t - t, t - (s.end ?? s.t));', 'const gap = (s: FieldPair, t: number) => Math.abs(s.t - t);',
+    [unit, range], 'BH-H2'],
+  ['BH-H2-b', 'every frame taken as held for a second (a real displacement hides in the hold)', 'src/verify/fields.ts',
+    '  if (next !== undefined) return next > t ? next : t;', '  return t + 1;', [range], 'BH-H2|M-3'],
   ['BH-M4', 'final ISO size not judged against the disc', 'src/verify/index.ts',
     '    ok: margin >= 0,', '    ok: true,', [unit, pipeline], 'ISO capacity|single-layer DVD'],
 ];

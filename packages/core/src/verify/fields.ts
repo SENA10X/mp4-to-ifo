@@ -103,6 +103,28 @@ export interface FieldPair {
   first: 'top' | 'bottom';
   top: Float32Array | null;
   bottom: Float32Array | null;
+  /**
+   * Source frames: until when the picture is shown (seconds, same timeline), see displayEnd(). A VFR
+   * frame can stay on screen long after its timestamp (BH-H2). Missing: a point at `t`.
+   */
+  end?: number;
+}
+
+/**
+ * Time from `t` to a source picture's display interval [t, end]: 0 while it is shown. Distances to
+ * source frames are always measured this way, so a held frame is near for as long as it is held.
+ */
+const gap = (s: FieldPair, t: number) => Math.max(0, s.t - t, t - (s.end ?? s.t));
+
+/**
+ * When a decoded frame stops being shown: the next decoded frame's time; for the last one decoded, its
+ * own duration (the container's sample duration). Timestamps that do not increase, or a duration that
+ * is missing or not positive, give no interval (the frame is a point), so broken timing never becomes
+ * a long hold.
+ */
+export function displayEnd(t: number, next: number | undefined, duration: number | null): number {
+  if (next !== undefined) return next > t ? next : t;
+  return duration !== null && duration > 0 ? t + duration : t;
 }
 
 export interface OutputField {
@@ -214,7 +236,7 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
     for (let i = 0; i < source.length; i++) {
       const s = source[i];
       const px = s?.[f.parity];
-      const dt = s ? Math.abs(s.t - f.t) : Infinity;
+      const dt = s ? gap(s, f.t) : Infinity;
       if (!s || !px || dt > WIDE_SEARCH_SEC) continue;
       const score = ncc(f.px, px);
       if (score > wideScore) {
@@ -230,7 +252,7 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
     // picture (the same test that separates moments).
     const near = best < 0 ? Infinity : Math.sqrt(Math.max(0, 2 - 2 * bestScore));
     const far = source[wide];
-    if (far && Math.abs(far.t - f.t) > SEARCH_SEC && wideScore >= MIN_NCC && near >= Math.max(SAME_DIST, CLEAR_FACTOR * Math.sqrt(Math.max(0, 2 - 2 * wideScore)))) {
+    if (far && gap(far, f.t) > SEARCH_SEC && wideScore >= MIN_NCC && near >= Math.max(SAME_DIST, CLEAR_FACTOR * Math.sqrt(Math.max(0, 2 - 2 * wideScore)))) {
       stats.displaced++;
       displaced.push(f.t - far.t);
     }
@@ -466,7 +488,7 @@ export function normalise(raw: Buffer, offset: number): Float32Array | null {
  * `prefix` brings the picture to the active area's lines, 64 columns wide (scale for the source, crop for the output).
  */
 async function decodeFieldPairs(tc: Toolchain, input: string, origin: number, map: string, start: number, duration: number, prefix: string, signal?: AbortSignal): Promise<FieldPair[]> {
-  const info: { t: number; duration: number; first: 'top' | 'bottom' }[] = [];
+  const info: { t: number; duration: number; reported: number | null; first: 'top' | 'bottom' }[] = [];
   const vf = `${prefix},showinfo,split[a][b];[a]field=top,scale=${W}:${H}:flags=area[t];[b]field=bottom,scale=${W}:${H}:flags=area[u];[t][u]vstack,format=gray`;
   // Read only the window (input -t counts from the seek point), not a fixed number of frames.
   const seek = Math.max(0, start - 0.5);
@@ -481,8 +503,9 @@ async function decodeFieldPairs(tc: Toolchain, input: string, origin: number, ma
       if (!/Parsed_showinfo/.test(line)) return;
       const t = /pts_time:\s*(-?[\d.]+)/.exec(line)?.[1];
       if (t === undefined) return;
-      const d = Number(/duration_time:\s*([\d.]+)/.exec(line)?.[1] ?? 1001 / 30000);
-      info.push({ t: Number(t), duration: d > 0 ? d : 1001 / 30000, first: /\bi:B\b/.test(line) ? 'bottom' : 'top' });
+      const reported = Number(/duration_time:\s*([\d.]+)/.exec(line)?.[1] ?? NaN);
+      const d = Number.isFinite(reported) && reported > 0 ? reported : null;
+      info.push({ t: Number(t), duration: d ?? 1001 / 30000, reported: d, first: /\bi:B\b/.test(line) ? 'bottom' : 'top' });
     },
   });
   const buf = r.stdoutBuffer;
@@ -491,7 +514,8 @@ async function decodeFieldPairs(tc: Toolchain, input: string, origin: number, ma
     const m = info[i]!;
     const t = m.t - origin;
     if (t >= start && t < start + duration) {
-      out.push({ t, duration: m.duration, first: m.first, top: normalise(buf, i * 2 * PIXELS), bottom: normalise(buf, i * 2 * PIXELS + PIXELS) });
+      const end = displayEnd(m.t, info[i + 1]?.t, m.reported) - origin;
+      out.push({ t, duration: m.duration, first: m.first, top: normalise(buf, i * 2 * PIXELS), bottom: normalise(buf, i * 2 * PIXELS + PIXELS), end });
     }
   }
   return out;
