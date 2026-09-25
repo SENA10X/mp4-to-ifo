@@ -24,13 +24,19 @@ import type { Toolchain } from '../toolchain.ts';
 const W = 64;
 const H = 48;
 const PIXELS = W * H;
-/** Output window per position; source frames are decoded this much wider on each side. */
-const WINDOW_SEC = 1.2;
-const SOURCE_MARGIN_SEC = 0.35;
 /** Moments are counted this far inside the window (display and source times differ by < 50 ms). */
 const EDGE_SEC = 0.1;
 /** Fields are compared with source frames at most this far apart in time. */
 const SEARCH_SEC = 0.25;
+/**
+ * Pictures and sound are also looked for this far away (M-3), only to find a match that lies outside
+ * the search: then the output shows the source, at the wrong time. Nothing within it is accepted that
+ * was not before; the timing tolerance is unchanged.
+ */
+export const WIDE_SEARCH_SEC = 1;
+/** Output window per position; source frames are decoded this much wider on each side. */
+const WINDOW_SEC = 1.2;
+const SOURCE_MARGIN_SEC = WIDE_SEARCH_SEC + 0.1;
 /** Match score below which a field is not treated as showing any source frame. */
 const MIN_NCC = 0.9;
 /** Differences below this (L2 of unit vectors, NCC > 0.99995) never separate two source frames. */
@@ -115,9 +121,11 @@ export interface FieldStats {
   /** Consecutive fields on clear moments that change moment, and those that go back in time. */
   steps: number;
   backwards: number;
+  /** Fields whose picture is found only outside the search (see WIDE_SEARCH_SEC). */
+  displaced: number;
 }
 
-export const emptyFieldStats = (): FieldStats => ({ fields: 0, matchedFields: 0, residual: 0, allMoments: 0, sourceMoments: 0, expected: 0, shown: 0, steps: 0, backwards: 0 });
+export const emptyFieldStats = (): FieldStats => ({ fields: 0, matchedFields: 0, residual: 0, allMoments: 0, sourceMoments: 0, expected: 0, shown: 0, steps: 0, backwards: 0, displaced: 0 });
 
 export function addFieldStats(a: FieldStats, b: FieldStats): FieldStats {
   const matched = a.matchedFields + b.matchedFields;
@@ -131,6 +139,7 @@ export function addFieldStats(a: FieldStats, b: FieldStats): FieldStats {
     shown: a.shown + b.shown,
     steps: a.steps + b.steps,
     backwards: a.backwards + b.backwards,
+    displaced: a.displaced + b.displaced,
   };
 }
 
@@ -153,6 +162,8 @@ export interface FieldAnalysis {
   stats: FieldStats;
   /** Change points of clear moments that the output enters cleanly (for picture timing). */
   changes: ChangePoint[];
+  /** Output minus source time of each displaced field (seconds; positive = picture late). */
+  displaced: number[];
 }
 
 /**
@@ -164,6 +175,7 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
   const stats = emptyFieldStats();
   const bestFrame: (number | null)[] = [];
   const residuals: number[] = [];
+  const displaced: number[] = [];
   for (const f of fields) {
     // A field without structure (black, flat) shows nothing that could be timed: not counted either way.
     if (!f.px) {
@@ -173,15 +185,30 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
     stats.fields++;
     let best = -1;
     let bestScore = -Infinity;
+    let wide = -1;
+    let wideScore = -Infinity;
     for (let i = 0; i < source.length; i++) {
       const s = source[i];
       const px = s?.[f.parity];
-      if (!s || !px || Math.abs(s.t - f.t) > SEARCH_SEC) continue;
+      const dt = s ? Math.abs(s.t - f.t) : Infinity;
+      if (!s || !px || dt > WIDE_SEARCH_SEC) continue;
       const score = ncc(f.px, px);
-      if (score > bestScore) {
+      if (score > wideScore) {
+        wideScore = score;
+        wide = i;
+      }
+      if (dt <= SEARCH_SEC && score > bestScore) {
         bestScore = score;
         best = i;
       }
+    }
+    // Displaced: the picture is found outside the search, and everything inside it is clearly another
+    // picture (the same test that separates moments).
+    const near = best < 0 ? Infinity : Math.sqrt(Math.max(0, 2 - 2 * bestScore));
+    const far = source[wide];
+    if (far && Math.abs(far.t - f.t) > SEARCH_SEC && wideScore >= MIN_NCC && near >= Math.max(SAME_DIST, CLEAR_FACTOR * Math.sqrt(Math.max(0, 2 - 2 * wideScore)))) {
+      stats.displaced++;
+      displaced.push(f.t - far.t);
     }
     if (best < 0 || bestScore < MIN_NCC) {
       bestFrame.push(null);
@@ -265,7 +292,22 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
   const share = moments.length > 0 ? Math.min(1, capacityHz * span / moments.length) : 0;
   stats.expected = clearMoments.length * share;
   stats.shown = clearMoments.filter((k) => shown.has(k)).length;
-  return { stats, changes };
+  return { stats, changes, displaced };
+}
+
+/**
+ * Pictures shown more than the search away from their source time (M-3): in some window, at least
+ * MIN_WINDOW_MOMENTS fields and half of its fields with structure are displaced. Without this such an
+ * output matched nothing nearby and was only "unmeasurable". Offset: median, milliseconds.
+ */
+export function judgeDisplacement(windows: FieldStats[], offsets: number[]): { offsetMs: number; fields: number; of: number } | null {
+  if (!windows.some((w) => w.displaced >= MIN_WINDOW_MOMENTS && 2 * w.displaced >= w.fields)) return null;
+  const sorted = [...offsets].sort((a, b) => a - b);
+  return {
+    offsetMs: Math.round((sorted[sorted.length >> 1] ?? 0) * 10000) / 10,
+    fields: windows.reduce((n, w) => n + w.displaced, 0),
+    of: windows.reduce((n, w) => n + w.fields, 0),
+  };
 }
 
 export type FieldTemporalStatus = 'passed' | 'failed' | 'unmeasurable';
@@ -421,6 +463,7 @@ export async function measureFields(input: FieldMeasureInput): Promise<FieldAnal
   const outputPrefix = `crop=${a.width}:${a.height}:${a.x}:${a.y},scale=${W}:${a.height}:flags=area`;
   let stats = emptyFieldStats();
   const changes: ChangePoint[] = [];
+  const displaced: number[] = [];
   const windows: FieldStats[] = [];
   for (const centre of input.windows) {
     const outStart = Math.max(0, centre - WINDOW_SEC / 2);
@@ -432,6 +475,7 @@ export async function measureFields(input: FieldMeasureInput): Promise<FieldAnal
     stats = addFieldStats(stats, window.stats);
     windows.push(window.stats);
     changes.push(...window.changes);
+    displaced.push(...window.displaced);
   }
-  return { stats, changes, windows };
+  return { stats, changes, displaced, windows };
 }

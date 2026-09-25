@@ -19,6 +19,7 @@ const hardening = 'test/integration/verify-hardening.test.ts';
 const robustness = 'test/integration/verify-robustness.test.ts';
 const unit = 'test/unit/verify.test.ts';
 const pipeline = 'test/integration/pipeline.test.ts';
+const range = 'test/integration/verify-timing-range.test.ts';
 
 /** id, what is turned off, file, exact text (must occur once), replacement, tests, test name pattern. */
 const MUTATIONS = [
@@ -75,6 +76,12 @@ const MUTATIONS = [
   ['BH-H1-b', 'fields without structure counted as unmatched evidence', 'src/verify/fields.ts',
     '    if (!f.px) {\n      bestFrame.push(null);', '    if (!f.px) {\n      stats.fields++;\n      bestFrame.push(null);',
     [unit, robustness], 'BH-H1'],
+  ['BH-M3-V', 'pictures found only outside the search not judged (unmeasurable again)', 'src/verify/fields.ts',
+    '  if (!windows.some((w) => w.displaced >= MIN_WINDOW_MOMENTS && 2 * w.displaced >= w.fields)) return null;', '  return null;',
+    [range], 'M-3'],
+  ['BH-M3-A', 'no wide search for sound', 'src/verify/sync.ts',
+    '(matchAudio(s.samples, s.start, o.samples, o.start) ?? matchAudio(s.samples, s.start, o.samples, o.start, WIDE_SEARCH_SEC))',
+    'matchAudio(s.samples, s.start, o.samples, o.start)', [range], 'M-3'],
   ['BH-M4', 'final ISO size not judged against the disc', 'src/verify/index.ts',
     '    ok: margin >= 0,', '    ok: true,', [unit, pipeline], 'ISO capacity|single-layer DVD'],
 ];

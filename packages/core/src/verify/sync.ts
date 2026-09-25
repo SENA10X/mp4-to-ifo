@@ -14,7 +14,7 @@
 import { isCancelled } from '../errors.ts';
 import { runTool, type RunResult } from '../process.ts';
 import type { Toolchain } from '../toolchain.ts';
-import type { ChangePoint } from './fields.ts';
+import { WIDE_SEARCH_SEC, type ChangePoint } from './fields.ts';
 
 const AUDIO_RATE = 8000;
 const WINDOW_SEC = 1.2;
@@ -96,12 +96,15 @@ function median(values: number[]): number | null {
   return s.length % 2 ? (s[mid] ?? 0) : ((s[mid - 1] ?? 0) + (s[mid] ?? 0)) / 2;
 }
 
-/** Best lag (seconds, output - source) by normalised cross-correlation, or null if not confident. */
-export function matchAudio(source: Float32Array, sourceStart: number, output: Float32Array, outputStart: number): number | null {
+/**
+ * Best lag (seconds, output - source) within ±searchSec by normalised cross-correlation, or null if not
+ * confident. `source` must cover the output's time ± searchSec.
+ */
+export function matchAudio(source: Float32Array, sourceStart: number, output: Float32Array, outputStart: number, searchSec = SEARCH_SEC): number | null {
   let energy = 0;
   for (const v of output) energy += v * v;
   if (energy / Math.max(1, output.length) < 1e-7) return null; // silence
-  const maxLag = Math.round(SEARCH_SEC * AUDIO_RATE);
+  const maxLag = Math.round(searchSec * AUDIO_RATE);
   const base = Math.round((outputStart - sourceStart) * AUDIO_RATE);
   let bestLag = 0;
   let best = -Infinity;
@@ -146,11 +149,13 @@ export async function measureSync(input: SyncInput): Promise<SyncMeasurement> {
   if (source.audioIndex !== null) {
     for (const centre of windows) {
       const outStart = Math.max(0, centre - WINDOW_SEC / 2);
-      const srcStart = Math.max(0, outStart - SEARCH_SEC - 0.1);
-      const srcLen = WINDOW_SEC + 2 * (SEARCH_SEC + 0.1);
+      const srcStart = Math.max(0, outStart - WIDE_SEARCH_SEC - 0.1);
+      const srcLen = WINDOW_SEC + 2 * (WIDE_SEARCH_SEC + 0.1);
       const s = await decodeAudio(tc, source.path, source.origin, `0:${source.audioIndex}`, srcStart, srcLen, signal);
       const o = await decodeAudio(tc, output.input, output.origin, '0:a:0', outStart, WINDOW_SEC, signal);
-      const lag = s && o ? matchAudio(s.samples, s.start, o.samples, o.start) : null;
+      // Nothing unique within the search: look wider, with the same rules, for sound that is there but
+      // more than the search away (M-3). The tolerance that judges the lag is unchanged.
+      const lag = s && o ? (matchAudio(s.samples, s.start, o.samples, o.start) ?? matchAudio(s.samples, s.start, o.samples, o.start, WIDE_SEARCH_SEC)) : null;
       if (lag !== null) audioOffsets.push(lag);
     }
   }

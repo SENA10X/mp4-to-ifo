@@ -35,3 +35,11 @@ export const SECOND_AUDIO = `(args) => {
   const map = args.slice(0, i).lastIndexOf('-map');
   return [...args.slice(0, map), '-map', args[map + 1], ...args.slice(map)];
 }`;
+
+/**
+ * Shift the audio content by `ms` (positive = late) and keep its length `seconds`: only the timing is
+ * wrong, not the duration.
+ */
+export const AUDIO_SHIFT = (ms: number, seconds: number) => ms >= 0
+  ? `(args) => args.map((a, i) => args[i - 1] === '-af' ? 'adelay=${ms}:all=1,atrim=end=${seconds},' + a : a)`
+  : `(args) => args.map((a, i) => args[i - 1] === '-af' ? 'atrim=start=${-ms / 1000},asetpts=PTS-STARTPTS,apad=whole_dur=${seconds},' + a : a)`;

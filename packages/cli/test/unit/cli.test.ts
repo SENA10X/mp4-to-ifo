@@ -49,7 +49,7 @@ function result(plan: ReturnType<typeof planConversion>): ConversionResult {
       relativeAvTiming: { status: 'unmeasurable', offsetMs: null },
       fieldTemporal: {
         status: 'passed', capacityHz: 30000 / 1001, coverage: 1, backwardRatio: 0, reason: '', worstWindow: { coverage: 1, backwardRatio: 0, judged: 5 },
-        stats: { fields: 360, matchedFields: 360, residual: 0.005, allMoments: 150, sourceMoments: 150, expected: 150, shown: 150, steps: 146, backwards: 0 },
+        stats: { fields: 360, matchedFields: 360, residual: 0.005, allMoments: 150, sourceMoments: 150, expected: 150, shown: 150, steps: 146, backwards: 0, displaced: 0 },
       },
     },
   };

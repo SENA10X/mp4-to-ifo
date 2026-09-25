@@ -18,7 +18,7 @@ import { runTool } from '../process.ts';
 import type { Toolchain } from '../toolchain.ts';
 import { readZip } from '../zip.ts';
 import { expectedDisplayTime } from '../profile/frame-rate.ts';
-import { judgeFields, measureFields, temporalCapacity, type FieldTemporalResult } from './fields.ts';
+import { WIDE_SEARCH_SEC, judgeDisplacement, judgeFields, measureFields, temporalCapacity, type FieldTemporalResult } from './fields.ts';
 import { measureSync, syncWindows, type SyncMeasurement } from './sync.ts';
 
 export const DURATION_TOLERANCE_S = 0.15;
@@ -234,7 +234,11 @@ export async function verifyOutput(input: VerifyInput): Promise<VerificationRepo
   });
   const judge = (value: number | null, tolerance: number): CheckStatus => (value === null ? 'unmeasurable' : Math.abs(value) <= tolerance ? 'passed' : 'failed');
 
-  const videoTiming = { status: judge(sync.videoTimelineErrorMs, SYNC_TOLERANCE_MS), errorMs: sync.videoTimelineErrorMs, matches: sync.videoMatches };
+  // Pictures found only outside the search are shown at the wrong time, whatever the change points say.
+  const displaced = judgeDisplacement(pictures.windows, pictures.displaced);
+  const videoTiming = displaced
+    ? { status: 'failed' as CheckStatus, errorMs: displaced.offsetMs, matches: sync.videoMatches }
+    : { status: judge(sync.videoTimelineErrorMs, SYNC_TOLERANCE_MS), errorMs: sync.videoTimelineErrorMs, matches: sync.videoMatches };
   const audioTiming = {
     status: hasSourceAudio ? judge(sync.audioTimingErrorMs, AUDIO_TIMING_TOLERANCE_MS) : 'not_applicable' as CheckStatus,
     errorMs: sync.audioTimingErrorMs,
@@ -252,7 +256,9 @@ export async function verifyOutput(input: VerifyInput): Promise<VerificationRepo
   };
   const late = (x: number | null) => (x === null ? '-' : `${x >= 0 ? '+' : ''}${x} ms`);
 
-  record('sync.video_timeline', videoTiming.status, videoTiming.errorMs !== null
+  record('sync.video_timeline', videoTiming.status, displaced
+    ? `picture about ${late(Math.round(displaced.offsetMs))}: ${displaced.fields} of ${displaced.of} fields show source pictures found only more than 250 ms away (searched ±${WIDE_SEARCH_SEC * 1000} ms)`
+    : videoTiming.errorMs !== null
     ? `picture ${late(videoTiming.errorMs)} (${sync.videoMatches} picture changes)`
     : `not measurable: ${sync.videoMatches} clear picture changes (still, slow or repeated pictures)`);
   record('sync.audio_timing', audioTiming.status, !hasSourceAudio ? 'no source audio (silent track added)'
