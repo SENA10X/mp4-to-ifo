@@ -149,3 +149,61 @@ describe('M7: a temporal fault inside one sampled window is not averaged away', 
     });
   });
 });
+
+describe('BH-H1: pictures without structure (black, near-black grain, fades) are not timing evidence', { skip: skipNoTools }, () => {
+  // Black normalised to a zero vector and near-black grain to a random one: each such frame counted as
+  // a new source moment that no field could show, and correct conversions failed on coverage.
+  const motion = { rate: '60000/1001', motion: true, size: '960x540' } as const;
+  const testsrc = { rate: '30000/1001', size: '1280x720' } as const;
+  const cases = [
+    { name: 'motion, cut to black', sample: { ...motion, blackout: 'cut' as const } },
+    { name: 'motion, fade through black', sample: { ...motion, blackout: 'fade' as const } },
+    { name: 'testsrc2, cut to black', sample: { ...testsrc, blackout: 'cut' as const } },
+    { name: 'testsrc2, cut to near-black grain', sample: { ...testsrc, blackout: 'noisy' as const } },
+    { name: 'testsrc2, fade through black', sample: { ...testsrc, blackout: 'fade' as const } },
+  ];
+  for (const c of cases) {
+    test(`${c.name}: correct conversion passes, timing still measured from the pictures around it`, async () => {
+      const r = await convert({ ...base(), input: makeSample(path.join(work, `bh-h1-${c.name.replace(/\W+/g, '-')}.mp4`), { ...c.sample, seconds: 8 }) });
+      assert.equal(r.verification.passed, true, `${r.verification.failed.join(',')}: ${r.verification.checks.filter((x) => !x.ok).map((x) => x.detail).join(' | ')}`);
+      assert.equal(check(r, 'sync.video_timeline')?.status, 'passed', check(r, 'sync.video_timeline')?.detail);
+      assert.equal(check(r, 'video.field_temporal')?.status, 'passed', check(r, 'video.field_temporal')?.detail);
+    });
+  }
+
+  test('flat pictures are unmeasurable, not a mismatch; dark pictures with structure stay measurable', async () => {
+    const flat = { still: true, seconds: 4 } as const;
+    // 'measured': timing and fields judged. 'evidence': the fields count (grain hides the slow motion, so
+    // no picture change is clear enough to time: unmeasurable by the Phase 5.2 rule, not by BH-H1).
+    for (const [name, sample, expect] of [
+      ['flat white', { ...flat, picture: 'drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill' }, 'flat'],
+      ['flat gray', { ...flat, picture: 'drawbox=x=0:y=0:w=iw:h=ih:color=gray:t=fill' }, 'flat'],
+      ['dark structured (grey testsrc2 at 1/20 contrast)', { ...testsrc, seconds: 5, picture: 'hue=s=0,lutyuv=y=16+val/20' }, 'measured'],
+      ['dark structured with grain', { ...testsrc, seconds: 5, picture: 'hue=s=0,lutyuv=y=16+val/20,noise=alls=12:allf=t' }, 'evidence'],
+    ] as const) {
+      const r = await convert({ ...base(), input: makeSample(path.join(work, `bh-h1-${name.replace(/\W+/g, '-')}.mp4`), sample) });
+      assert.equal(r.verification.passed, true, `${name}: ${r.verification.failed.join(',')}`);
+      const ft = r.verification.fieldTemporal;
+      if (expect === 'flat') {
+        assert.equal(r.verification.videoTiming.status, 'unmeasurable', name);
+        assert.equal(ft.status, 'unmeasurable', `${name}: ${ft.reason}`);
+        assert.equal(ft.stats.fields, 0, `${name}: flat fields are not counted`);
+      } else {
+        assert.ok(ft.stats.matchedFields / ft.stats.fields > 0.9, `${name}: ${ft.stats.matchedFields}/${ft.stats.fields} fields matched`);
+        if (expect === 'measured') {
+          assert.equal(r.verification.videoTiming.status, 'passed', `${name}: ${check(r, 'sync.video_timeline')?.detail}`);
+          assert.equal(ft.status, 'passed', `${name}: ${ft.reason}`);
+        }
+      }
+    }
+  });
+
+  test('real faults are still caught on material with black: 33 ms picture delay, 60i temporal loss, pictures lost to black', async () => {
+    const src = makeSample(path.join(work, 'bh-h1-faults.mp4'), { ...motion, blackout: 'cut', seconds: 8 });
+    await assert.rejects(convert({ ...base(), input: src, frameRatePolicy: BUG_33MS }), verifyError(/sync\.video_timeline/));
+    await assert.rejects(convert({ ...base(), input: src, frameRatePolicy: policy('bh-h1-loss', 'fps=30000/1001:start_time=0') }), verifyError(/video\.field_temporal/));
+    // The output goes black over the last window while the source still moves: its moments are not shown.
+    const blank = policy('bh-h1-blank', `${FILTER_INTERLACE_60I},drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable='between(t,6,7.6)'`);
+    await assert.rejects(convert({ ...base(), input: src, frameRatePolicy: blank }), verifyError(/video\.field_temporal/));
+  });
+});

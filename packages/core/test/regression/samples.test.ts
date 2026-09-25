@@ -3,6 +3,7 @@
 // Run: npm run test:regression -w @mp4-to-ifo/core
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
@@ -114,4 +115,22 @@ describe('PoC sample regression', { skip }, () => {
       }
     });
   }
+});
+
+describe('BH-H1: real footage with a fade through black', { skip }, () => {
+  test('opening-movie faded out and in across the second sampling window passes, picture timing measured', async () => {
+    const input = path.join(samples, 'opening-movie.mp4');
+    const dir = path.join(outRoot, 'bh-h1');
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    const faded = path.join(dir, 'opening-fade.mp4');
+    // 20 s clip, windows at 3/7/11/15/18 s: out over 6.0-6.8 s, in over 7.0-7.8 s.
+    execFileSync(toolchain!.ffmpeg, ['-v', 'error', '-i', input, '-filter_complex',
+      '[0:v]split[a][b];[a]trim=0:7,fade=t=out:st=6:d=0.8[x];[b]trim=7,setpts=PTS-STARTPTS,fade=t=in:st=0:d=0.8[y];[x][y]concat[v]',
+      '-map', '[v]', '-map', '0:a', '-r', '30000/1001', '-c:v', 'mpeg4', '-q:v', '2', '-c:a', 'copy', faded]);
+    const r = await convert({ input: faded, toolchain: toolchain!, outputDirectory: dir, requireLgpl: true, lock: { dir: path.join(outRoot, '.lock') } });
+    assert.equal(r.verification.passed, true, r.verification.failed.join(','));
+    assert.equal(r.verification.videoTiming.status, 'passed', JSON.stringify(r.verification.videoTiming));
+    assert.equal(r.verification.fieldTemporal.status, 'passed', r.verification.fieldTemporal.reason);
+  });
 });

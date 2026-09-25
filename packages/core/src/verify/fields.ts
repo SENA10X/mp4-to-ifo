@@ -44,6 +44,15 @@ const SAME_DIST = 0.01;
 const CLEAR_FACTOR = 3;
 /** A multi-frame moment has a precise start only if the strategy shows every source frame (rate <= capacity). */
 const RATE_TOLERANCE = 1.01;
+/**
+ * Least picture structure (8-bit luma levels) that a 64x48 line set needs to be timing evidence: the
+ * spatially coherent part (lag-1 autocovariance, to which uncorrelated grain and rounding add nothing).
+ * Below 3x the 8-bit rounding noise (3 x 0.29 = 0.87 levels) even an exact copy of the picture cannot
+ * reach MIN_NCC. Measured (Beta Hardening, BH-H1): black, white and flat 0; near-black noise and grain
+ * 0.1-0.8 (only grain too heavy for the encoder reaches 1.5); desaturated testsrc2 at 1/40 contrast 1.7,
+ * dark + grain 1.4-1.5; a small title card 3.0; gradients 7+; every regression sample 56+.
+ */
+export const MIN_STRUCTURE = 1;
 
 /** Distinct source moments per second the strategy can deliver (a DVD property, not the generator's mapping). */
 export function temporalCapacity(strategy: FrameRateStrategyId): number {
@@ -59,7 +68,10 @@ export function temporalCapacity(strategy: FrameRateStrategyId): number {
   }
 }
 
-/** A decoded picture as its two line sets (zero-mean, unit-norm 64x48 luma each). */
+/**
+ * A decoded picture as its two line sets (zero-mean, unit-norm 64x48 luma each), or null for a line set
+ * with too little structure to tell pictures apart (see normalise()): not evidence either way.
+ */
 export interface FieldPair {
   /** Seconds on the shared timeline (file origin removed). */
   t: number;
@@ -67,14 +79,14 @@ export interface FieldPair {
   duration: number;
   /** Field shown first: 'top' unless the frame is flagged bottom field first. */
   first: 'top' | 'bottom';
-  top: Float32Array;
-  bottom: Float32Array;
+  top: Float32Array | null;
+  bottom: Float32Array | null;
 }
 
 export interface OutputField {
   t: number;
   parity: 'top' | 'bottom';
-  px: Float32Array;
+  px: Float32Array | null;
 }
 
 /** Output frames -> fields in display order. */
@@ -153,13 +165,19 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
   const bestFrame: (number | null)[] = [];
   const residuals: number[] = [];
   for (const f of fields) {
+    // A field without structure (black, flat) shows nothing that could be timed: not counted either way.
+    if (!f.px) {
+      bestFrame.push(null);
+      continue;
+    }
     stats.fields++;
     let best = -1;
     let bestScore = -Infinity;
     for (let i = 0; i < source.length; i++) {
       const s = source[i];
-      if (!s || Math.abs(s.t - f.t) > SEARCH_SEC) continue;
-      const score = ncc(f.px, s[f.parity]);
+      const px = s?.[f.parity];
+      if (!s || !px || Math.abs(s.t - f.t) > SEARCH_SEC) continue;
+      const score = ncc(f.px, px);
       if (score > bestScore) {
         bestScore = score;
         best = i;
@@ -178,21 +196,25 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
   stats.residual = residual;
 
   // Moments: a new one starts only at a clear change (both line sets), so repeats and unresolvable
-  // differences never split a moment. first[k] / last[k] are the moment's frame indices.
+  // differences never split a moment. first[k] / last[k] are the moment's frame indices. Frames without
+  // structure belong to no moment; the pictures on either side of them are compared with each other.
   const boundary = Math.max(SAME_DIST, CLEAR_FACTOR * residual);
-  const step = (i: number) => {
-    const a = source[i];
-    const b = source[i - 1];
-    return a && b ? Math.min(dist(a.top, b.top), dist(a.bottom, b.bottom)) : 0;
-  };
-  const momentOf: number[] = [];
+  const momentOf: (number | null)[] = [];
   const first: number[] = [];
   const last: number[] = [];
-  source.forEach((_, i) => {
-    if (i === 0 || step(i) >= boundary) first.push(i);
+  let previous: FieldPair | null = null;
+  let informativeFrames = 0;
+  source.forEach((s, i) => {
+    if (!s.top || !s.bottom) {
+      momentOf.push(null);
+      return;
+    }
+    if (!previous?.top || !previous.bottom || Math.min(dist(s.top, previous.top), dist(s.bottom, previous.bottom)) >= boundary) first.push(i);
     const k = first.length - 1;
     momentOf.push(k);
     last[k] = i;
+    previous = s;
+    if (s.t >= from && s.t < to) informativeFrames++;
   });
   const matched = bestFrame.map((i) => (i === null ? null : (momentOf[i] ?? null)));
 
@@ -207,14 +229,14 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
   const isClear = new Set(clearMoments);
 
   const shown = new Set(matched.filter((m): m is number => m !== null));
-  let previous: number | null = null;
+  let before: number | null = null;
   for (const m of matched) {
     const current = m !== null && isClear.has(m) ? m : null;
-    if (current !== null && previous !== null && current !== previous) {
+    if (current !== null && before !== null && current !== before) {
       stats.steps++;
-      if (current < previous) stats.backwards++;
+      if (current < before) stats.backwards++;
     }
-    previous = current;
+    before = current;
   }
 
   // Change points. A moment of several frames starts precisely only if every source frame is shown;
@@ -236,8 +258,11 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
 
   stats.allMoments = moments.length;
   stats.sourceMoments = clearMoments.length;
-  // When the source has more moments than the strategy can carry, a correct output shows that share.
-  const share = moments.length > 0 ? Math.min(1, capacityHz * (to - from) / moments.length) : 0;
+  // When the source has more moments than the strategy can carry, a correct output shows that share
+  // (of the time that has pictures with structure).
+  const framesInside = source.filter((s) => s.t >= from && s.t < to).length;
+  const span = framesInside > 0 ? (to - from) * informativeFrames / framesInside : 0;
+  const share = moments.length > 0 ? Math.min(1, capacityHz * span / moments.length) : 0;
   stats.expected = clearMoments.length * share;
   stats.shown = clearMoments.filter((k) => shown.has(k)).length;
   return { stats, changes };
@@ -307,7 +332,13 @@ export function judgeFields(stats: FieldStats, capacityHz: number, windows: Fiel
   };
 }
 
-function normalise(raw: Buffer, offset: number): Float32Array {
+/**
+ * A line set as a zero-mean unit vector, or null when it has less structure than MIN_STRUCTURE: then
+ * normalising would only amplify rounding and grain (black gives a zero vector, near-black noise a
+ * random one, and either looks like a new picture every frame). Such a line set is no evidence either
+ * way: it starts no moment and is not counted as a matched or unmatched field.
+ */
+export function normalise(raw: Buffer, offset: number): Float32Array | null {
   const px = new Float32Array(PIXELS);
   let mean = 0;
   for (let i = 0; i < PIXELS; i++) mean += raw[offset + i] ?? 0;
@@ -318,7 +349,18 @@ function normalise(raw: Buffer, offset: number): Float32Array {
     px[i] = v;
     norm += v * v;
   }
-  norm = Math.sqrt(norm) || 1;
+  let coherent = 0;
+  let pairs = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const v = px[y * W + x] ?? 0;
+      if (x + 1 < W) coherent += v * (px[y * W + x + 1] ?? 0);
+      if (y + 1 < H) coherent += v * (px[(y + 1) * W + x] ?? 0);
+      pairs += (x + 1 < W ? 1 : 0) + (y + 1 < H ? 1 : 0);
+    }
+  }
+  if (Math.sqrt(Math.max(0, coherent / pairs)) < MIN_STRUCTURE) return null;
+  norm = Math.sqrt(norm);
   for (let i = 0; i < PIXELS; i++) px[i] = (px[i] ?? 0) / norm;
   return px;
 }

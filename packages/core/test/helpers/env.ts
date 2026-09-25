@@ -60,6 +60,14 @@ export interface SampleOptions {
   contentRate?: string;
   /** Three still pictures, 3 s each: hard cuts, or 1 s crossfades between them (7 s). */
   slideshow?: 'cut' | 'crossfade';
+  /**
+   * Pictures without structure in an 8 s clip, inside the first and third sampling windows: 'cut' to
+   * black at 1.5-2.4 s and 4.5-5.6 s, 'noisy' the same to near-black with grain (grain throughout), 'fade'
+   * out over 2-4 s and in over 5-7 s.
+   */
+  blackout?: 'cut' | 'noisy' | 'fade';
+  /** Extra ffmpeg filters for the generated picture (e.g. darken, add grain). */
+  picture?: string;
   /** Drop frames irregularly and keep timestamps (VFR). */
   vfr?: boolean;
   rotation?: number;
@@ -94,6 +102,12 @@ export function makeSample(file: string, o: SampleOptions = {}): string {
   } else {
     video = `testsrc2=s=${size}:r=${pictureRate}:d=${seconds}${repeat}`;
   }
+  if (o.picture) video += `,${o.picture}`;
+  if (o.blackout === 'cut' || o.blackout === 'noisy') {
+    video += `,drawbox=x=0:y=0:w=iw:h=ih:color=${o.blackout === 'cut' ? 'black' : '0x101010'}:t=fill:enable='between(t,1.5,2.4)+between(t,4.5,5.6)'`;
+    if (o.blackout === 'noisy') video += ',noise=alls=6:allf=t';
+  }
+  if (o.blackout === 'fade') video += ',split[a][b];[a]trim=0:4,fade=t=out:st=2:d=2[x];[b]trim=4,setpts=PTS-STARTPTS,fade=t=in:st=1:d=2[y];[x][y]concat';
   if (o.vfr) video += ",select='not(gte(mod(t\\,3)\\,1)*mod(n\\,2))*not(eq(mod(n*7\\,23)\\,0))'";
   const click = "if(lt(mod(t,1),0.02),0.5*sin(2*PI*1000*t),0)";
   const tone = (f: number, a: number) => `${a}*sin(2*PI*${f}*t)`;

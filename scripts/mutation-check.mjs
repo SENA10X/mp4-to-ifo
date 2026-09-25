@@ -69,6 +69,12 @@ const MUTATIONS = [
   ['M7', 'windows pooled only (a local fault is averaged away)', 'src/verify/index.ts',
     '  const fieldTemporal = judgeFields(pictures.stats, capacityHz, pictures.windows);', '  const fieldTemporal = judgeFields(pictures.stats, capacityHz);',
     [robustness], 'M7'],
+  ['BH-H1-a', 'pictures without structure normalised again (black a zero vector, noise a random one)', 'src/verify/fields.ts',
+    '  if (Math.sqrt(Math.max(0, coherent / pairs)) < MIN_STRUCTURE) return null;', '  if (norm === 0) return new Float32Array(PIXELS);',
+    [unit, robustness], 'BH-H1'],
+  ['BH-H1-b', 'fields without structure counted as unmatched evidence', 'src/verify/fields.ts',
+    '    if (!f.px) {\n      bestFrame.push(null);', '    if (!f.px) {\n      stats.fields++;\n      bestFrame.push(null);',
+    [unit, robustness], 'BH-H1'],
   ['BH-M4', 'final ISO size not judged against the disc', 'src/verify/index.ts',
     '    ok: margin >= 0,', '    ok: true,', [unit, pipeline], 'ISO capacity|single-layer DVD'],
 ];

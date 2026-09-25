@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  MAX_BACKWARD_RATIO, MIN_FIELD_COVERAGE, addFieldStats, analyseFields, displayFields, judgeFields, temporalCapacity, type FieldPair, type OutputField,
+  MAX_BACKWARD_RATIO, MIN_FIELD_COVERAGE, MIN_STRUCTURE, addFieldStats, analyseFields, displayFields, judgeFields, normalise, temporalCapacity, type FieldPair, type OutputField,
 } from '../../src/verify/fields.ts';
 import { DVD_PLUS_R_SL_BYTES } from '../../src/capacity.ts';
 import { carrying, judgeAudioStreams, judgeIsoCapacity } from '../../src/verify/index.ts';
@@ -222,4 +222,44 @@ test('ISO capacity: the written ISO must fit the smaller single-layer disc (DVD+
   assert.equal(judgeIsoCapacity(DVD_PLUS_R_SL_BYTES + 2048).ok, false);
   assert.equal(judgeIsoCapacity(null).ok, false);
   assert.match(judgeIsoCapacity(DVD_PLUS_R_SL_BYTES + 1).detail, /1 bytes over/);
+});
+
+test('BH-H1: line sets without structure are no evidence either way; the pictures around them still are', () => {
+  const src = source(60000 / 1001, 2);
+  const blank = (i: number) => i >= 40 && i < 70; // half a second of black in the source and the output
+  const black = Object.assign(src.map((f, i) => (blank(i) ? { ...f, top: null, bottom: null } : f)), { seeds: src.seeds });
+  const fields = fieldsShowing(src, 120, (j) => j).map((f, j) => (blank(j) ? { ...f, px: null } : f));
+  const a = analyseFields(black, fields, 0.2, 1.8, cap60i);
+  const r = judgeFields(a.stats, cap60i);
+  assert.equal(r.status, 'passed', r.reason);
+  assert.equal(r.coverage, 1, r.reason);
+  assert.equal(a.stats.fields, 90, 'black fields are not counted');
+  assert.ok(a.changes.length > 60 && a.changes.every((c) => Math.abs(c.out - c.src) < 1e-6), `${a.changes.length} changes`);
+  // Timing faults on either side of the black are still seen.
+  const late = analyseFields(black, fieldsShowing(src, 120, (j) => Math.max(0, j - 2)).map((f, j) => (blank(j - 2) ? { ...f, px: null } : f)), 0.2, 1.8, cap60i);
+  assert.ok(late.changes.length > 60 && late.changes.every((c) => Math.abs(c.out - c.src - 2 * FIELD) < 1e-6));
+  // Nothing but black: unmeasurable, never failed.
+  const allBlack = src.map((f) => ({ ...f, top: null, bottom: null }));
+  const none = judgeFields(analyseFields(allBlack, fields.map((f) => ({ ...f, px: null })), 0.2, 1.8, cap60i).stats, cap60i);
+  assert.equal(none.status, 'unmeasurable', none.reason);
+});
+
+test('BH-H1: structure floor: flat pictures, near-black noise and grain are not pictures; faint real structure is', () => {
+  const W = 64;
+  let seed = 12345;
+  const noise = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296 - 0.5;
+  };
+  const line = (f: (x: number, y: number) => number) =>
+    Buffer.from(Array.from({ length: 64 * 48 }, (_, i) => Math.max(0, Math.min(255, Math.round(f(i % W, Math.floor(i / W)))))));
+  assert.equal(normalise(line(() => 16), 0), null, 'black');
+  assert.equal(normalise(line(() => 235), 0), null, 'white');
+  assert.equal(normalise(line(() => 16 + 2 * noise()), 0), null, 'near-black noise');
+  assert.equal(normalise(line(() => 128 + 14 * noise()), 0), null, 'grain of 4 levels (std) on grey');
+  assert.equal(normalise(line((x, y) => 128 + ((x + y) % 2 ? 3 : -3)), 0), null, 'a pixel checkerboard has no coherent structure');
+  assert.notEqual(normalise(line((x) => (x < 32 ? 16 : 19)), 0), null, 'two dark areas 3 levels apart (std 1.5)');
+  assert.notEqual(normalise(line((x) => 16 + x / 8), 0), null, 'dark gradient 16-24');
+  assert.notEqual(normalise(line((x, y) => (x > 28 && x < 36 && y > 22 && y < 26 ? 235 : 16)), 0), null, 'a small title on black');
+  assert.equal(MIN_STRUCTURE, 1);
 });
