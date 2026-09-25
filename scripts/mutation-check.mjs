@@ -82,6 +82,11 @@ const MUTATIONS = [
   ['BH-M3-A', 'no wide search for sound', 'src/verify/sync.ts',
     '(matchAudio(s.samples, s.start, o.samples, o.start) ?? matchAudio(s.samples, s.start, o.samples, o.start, WIDE_SEARCH_SEC))',
     'matchAudio(s.samples, s.start, o.samples, o.start)', [range], 'M-3'],
+  ['BH-M2-a', 'pictures that repeat within the search timed again (earliest instance wins)', 'src/verify/fields.ts',
+    '  const clear = (k: number) => residuals.length > 0 && bounded(k) && !repeats.has(k);', '  const clear = (k: number) => residuals.length > 0 && bounded(k);',
+    [unit, range], 'M-2'],
+  ['BH-M2-b', 'repeating pictures can no longer show that no repeat is on time', 'src/verify/index.ts',
+    'sync.videoAmbiguousMs > SYNC_TOLERANCE_MS;', 'sync.videoAmbiguousMs > 1e9;', [range], 'M-2'],
   ['BH-M4', 'final ISO size not judged against the disc', 'src/verify/index.ts',
     '    ok: margin >= 0,', '    ok: true,', [unit, pipeline], 'ISO capacity|single-layer DVD'],
 ];

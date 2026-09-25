@@ -229,6 +229,7 @@ export async function verifyOutput(input: VerifyInput): Promise<VerificationRepo
     },
     output: { input: concat, origin: outOrigin, videoStart: outVideoStart },
     changes: pictures.changes,
+    ambiguous: pictures.ambiguous,
     expectedDisplayTime: (t) => expectedDisplayTime(strategy, t),
     signal,
   });
@@ -236,9 +237,13 @@ export async function verifyOutput(input: VerifyInput): Promise<VerificationRepo
 
   // Pictures found only outside the search are shown at the wrong time, whatever the change points say.
   const displaced = judgeDisplacement(pictures.windows, pictures.displaced);
+  // Repeating pictures (M-2) can only show that no repeat is on time; one that fits proves nothing.
+  const offRepeats = sync.videoTimelineErrorMs === null && sync.videoAmbiguousMs !== null && sync.videoAmbiguousMs > SYNC_TOLERANCE_MS;
   const videoTiming = displaced
     ? { status: 'failed' as CheckStatus, errorMs: displaced.offsetMs, matches: sync.videoMatches }
-    : { status: judge(sync.videoTimelineErrorMs, SYNC_TOLERANCE_MS), errorMs: sync.videoTimelineErrorMs, matches: sync.videoMatches };
+    : offRepeats
+      ? { status: 'failed' as CheckStatus, errorMs: sync.videoAmbiguousMs, matches: sync.videoMatches }
+      : { status: judge(sync.videoTimelineErrorMs, SYNC_TOLERANCE_MS), errorMs: sync.videoTimelineErrorMs, matches: sync.videoMatches };
   const audioTiming = {
     status: hasSourceAudio ? judge(sync.audioTimingErrorMs, AUDIO_TIMING_TOLERANCE_MS) : 'not_applicable' as CheckStatus,
     errorMs: sync.audioTimingErrorMs,
@@ -258,8 +263,12 @@ export async function verifyOutput(input: VerifyInput): Promise<VerificationRepo
 
   record('sync.video_timeline', videoTiming.status, displaced
     ? `picture about ${late(Math.round(displaced.offsetMs))}: ${displaced.fields} of ${displaced.of} fields show source pictures found only more than 250 ms away (searched ±${WIDE_SEARCH_SEC * 1000} ms)`
+    : offRepeats
+    ? `picture off by at least ${sync.videoAmbiguousMs} ms: the pictures repeat within ±250 ms and none of the repeats is on time (${sync.videoAmbiguousMatches} changes)`
     : videoTiming.errorMs !== null
     ? `picture ${late(videoTiming.errorMs)} (${sync.videoMatches} picture changes)`
+    : sync.videoAmbiguousMatches > 0
+    ? `not measurable: ${sync.videoMatches} clear picture changes; ${sync.videoAmbiguousMatches} into pictures that repeat within ±250 ms, whose time cannot be told from the picture`
     : `not measurable: ${sync.videoMatches} clear picture changes (still, slow or repeated pictures)`);
   record('sync.audio_timing', audioTiming.status, !hasSourceAudio ? 'no source audio (silent track added)'
     : audioTiming.errorMs !== null

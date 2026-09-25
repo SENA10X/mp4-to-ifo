@@ -49,6 +49,8 @@ export interface SampleOptions {
   audio?: 'stereo' | 'mono' | '5.1' | '5.1-loud' | 'quad' | 'none' | 'clicks' | 'noise' | 'tone' | 'pulses' | 'silent';
   /** Frame index as a 12-bit code and a click every second (see motion.ts). */
   motion?: boolean;
+  /** With `motion`: the pictures repeat every `period` frames (the code of n mod period). */
+  period?: number;
   /** A still picture (SMPTE bars) for the whole clip. */
   still?: boolean;
   /** Exact number of video frames (overrides seconds for the picture; audio lasts as long). */
@@ -95,7 +97,7 @@ export function makeSample(file: string, o: SampleOptions = {}): string {
   } else if (o.motion) {
     const boxW = Math.floor(w / 12);
     const boxes = Array.from({ length: 12 }, (_, i) =>
-      `drawbox=x=${i * boxW}:y=0:w=${boxW}:h=${h}:color=white:t=fill:enable='eq(mod(floor(n/${2 ** i}),2),1)'`).join(',');
+      `drawbox=x=${i * boxW}:y=0:w=${boxW}:h=${h}:color=white:t=fill:enable='eq(mod(floor(${o.period ? `mod(n,${o.period})` : 'n'}/${2 ** i}),2),1)'`).join(',');
     video = `color=c=black:s=${size}:r=${pictureRate}:d=${seconds},format=yuv420p,${boxes}${repeat}`;
   } else if (o.still) {
     video = `smptebars=s=${size}:r=${rate}:d=${seconds}`;

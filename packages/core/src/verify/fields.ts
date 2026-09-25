@@ -158,12 +158,20 @@ export interface ChangePoint {
   src: number;
 }
 
+/** Where the output first shows a picture that repeats in the source, and every start of that picture nearby. */
+export interface AmbiguousChangePoint {
+  out: number;
+  src: number[];
+}
+
 export interface FieldAnalysis {
   stats: FieldStats;
   /** Change points of clear moments that the output enters cleanly (for picture timing). */
   changes: ChangePoint[];
   /** Output minus source time of each displaced field (seconds; positive = picture late). */
   displaced: number[];
+  /** Entries into pictures that repeat within the search (M-2): no one time, only candidates. */
+  ambiguous: AmbiguousChangePoint[];
 }
 
 /**
@@ -250,7 +258,21 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
     const t = source[first[k] ?? -1]?.t;
     return t !== undefined && t >= from && t < to;
   };
-  const clear = (k: number) => residuals.length > 0 && (first[k] ?? 0) > 0 && (last[k] ?? Infinity) + 1 < source.length;
+  // Pictures that come back (M-2): a moment whose picture the source shows again, as another moment,
+  // within the search cannot be placed in time by its picture. Which of the equal instances a field
+  // matches is chance (the earliest won, and a correct 5 Hz flicker measured +200 ms).
+  const same = (a: FieldPair, b: FieldPair) => !!(a.top && a.bottom && b.top && b.bottom) && Math.min(dist(a.top, b.top), dist(a.bottom, b.bottom)) < boundary;
+  const repeats = new Map<number, Set<number>>();
+  source.forEach((a, i) => {
+    const ka = momentOf[i];
+    for (let j = i + 1; ka != null && j < source.length && (source[j]?.t ?? Infinity) - a.t <= SEARCH_SEC; j++) {
+      const kb = momentOf[j];
+      if (kb == null || kb === ka || !same(a, source[j]!)) continue;
+      for (const [x, y] of [[ka, kb], [kb, ka]] as const) repeats.set(x, (repeats.get(x) ?? new Set()).add(y));
+    }
+  });
+  const bounded = (k: number) => (first[k] ?? 0) > 0 && (last[k] ?? Infinity) + 1 < source.length;
+  const clear = (k: number) => residuals.length > 0 && bounded(k) && !repeats.has(k);
   const moments = first.map((_, k) => k).filter(inside);
   const clearMoments = moments.filter(clear);
   const isClear = new Set(clearMoments);
@@ -282,6 +304,22 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
     const src = source[first[k] ?? -1];
     if (field && src) changes.push({ out: field.t, src: src.t });
   }
+  // Entries into repeating pictures: the output changes to such a picture; every start of it nearby is a
+  // candidate time. They can show that no candidate fits, never that one does (sync.ts).
+  const ambiguous: AmbiguousChangePoint[] = [];
+  const start = (k: number) => source[first[k] ?? -1]?.t;
+  matched.forEach((m, j) => {
+    const p = j > 0 ? matched[j - 1] : null;
+    const alike = m != null ? repeats.get(m) : undefined;
+    if (m == null || p == null || !alike || p === m || alike.has(p) || !inside(m) || !bounded(m) || residuals.length === 0) return;
+    if (!everyFrameShown && (last[m] ?? 0) > (first[m] ?? 0)) return;
+    const a = source[first[m] ?? -1];
+    const b = source[first[p] ?? -1];
+    if (!a || !b || same(a, b)) return; // not a change of picture
+    const field = fields[j];
+    const candidates = [m, ...alike].map(start).filter((t): t is number => t !== undefined);
+    if (field) ambiguous.push({ out: field.t, src: candidates });
+  });
 
   stats.allMoments = moments.length;
   stats.sourceMoments = clearMoments.length;
@@ -292,7 +330,7 @@ export function analyseFields(source: FieldPair[], fields: OutputField[], from: 
   const share = moments.length > 0 ? Math.min(1, capacityHz * span / moments.length) : 0;
   stats.expected = clearMoments.length * share;
   stats.shown = clearMoments.filter((k) => shown.has(k)).length;
-  return { stats, changes, displaced };
+  return { stats, changes, displaced, ambiguous };
 }
 
 /**
@@ -464,6 +502,7 @@ export async function measureFields(input: FieldMeasureInput): Promise<FieldAnal
   let stats = emptyFieldStats();
   const changes: ChangePoint[] = [];
   const displaced: number[] = [];
+  const ambiguous: AmbiguousChangePoint[] = [];
   const windows: FieldStats[] = [];
   for (const centre of input.windows) {
     const outStart = Math.max(0, centre - WINDOW_SEC / 2);
@@ -476,6 +515,7 @@ export async function measureFields(input: FieldMeasureInput): Promise<FieldAnal
     windows.push(window.stats);
     changes.push(...window.changes);
     displaced.push(...window.displaced);
+    ambiguous.push(...window.ambiguous);
   }
-  return { stats, changes, displaced, windows };
+  return { stats, changes, displaced, ambiguous, windows };
 }

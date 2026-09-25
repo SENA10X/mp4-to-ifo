@@ -42,7 +42,7 @@ function result(plan: ReturnType<typeof planConversion>): ConversionResult {
       durations: { expectedVideo: 92, expectedAudio: 92, video: 92, audio: 92.01, ifo: 92 },
       sync: {
         status: 'partial', windows: [], videoMatches: 10, videoOffsetMs: 5.3, audioMatches: 0, audioOffsetMs: null, videoTimelineErrorMs: 0,
-        audioTimingErrorMs: null, audioWindowOffsetsMs: [], introducedOffsetMs: null,
+        audioTimingErrorMs: null, audioWindowOffsetsMs: [], introducedOffsetMs: null, videoAmbiguousMs: null, videoAmbiguousMatches: 0,
       },
       videoTiming: { status: 'passed', errorMs: 0, matches: 10 },
       audioTiming: { status: 'unmeasurable', errorMs: null, confidentWindows: 0, windows: 5 },

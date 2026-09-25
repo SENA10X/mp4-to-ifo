@@ -8,7 +8,7 @@ import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { ConversionError } from '../../src/errors.ts';
 import { convert, type ConversionResult } from '../../src/job.ts';
-import { INTERLACED_POLICY, type FrameRatePolicy } from '../../src/profile/frame-rate.ts';
+import { FILTER_INTERLACE_60I, INTERLACED_POLICY, type FrameRatePolicy } from '../../src/profile/frame-rate.ts';
 import { AUDIO_SHIFT, faultToolchain } from '../helpers/fault.ts';
 import { makeSample, skipNoTools, tempDir, toolchain, type SampleOptions } from '../helpers/env.ts';
 
@@ -80,5 +80,52 @@ describe('M-3: a picture or sound more than 250 ms off is a timing fault, not "u
       assert.ok(Math.abs(r.verification.audioTiming.errorMs ?? 99) <= 1, `${name}: ${r.verification.audioTiming.errorMs}`);
       if (name !== 'still') assert.equal(r.verification.videoTiming.status, 'passed', `${name}: ${check(r, 'sync.video_timeline')?.detail}`);
     }
+  });
+});
+
+describe('M-2: a picture that repeats within the search does not tell the time', { skip: skipNoTools }, () => {
+  // Pictures repeating every `period` frames: several source instances match a field equally, and the
+  // earliest was taken as its time (a correct 5 Hz output measured +200 ms). The sound is distinctive noise.
+  const matrix = [
+    ['30000/1001', 6], ['30000/1001', 2], ['30000/1001', 12], ['60000/1001', 12], ['60000/1001', 4], ['60000/1001', 6],
+    ['24000/1001', 5], ['25', 5],
+  ] as const;
+  const periodic = (rate: string, period: number): SampleOptions => ({ rate, motion: true, period, audio: 'noise', seconds: SECONDS, size: '960x540' });
+  for (const [rate, period] of matrix) {
+    const repeatMs = Math.round(period * 1000 * Number(rate.split('/')[1] ?? 1) / Number(rate.split('/')[0]));
+    test(`${rate} fps, picture repeats every ${period} frames (${repeatMs} ms): correct conversion passes, ${repeatMs <= 250 ? 'picture timing ambiguous' : 'picture timing measured'}`, async () => {
+      const r = await convert({ ...base(), input: makeSample(path.join(work, `m2-${rate.replace('/', '_')}-${period}.mp4`), periodic(rate, period)) });
+      assert.equal(r.verification.passed, true, `${r.verification.failed.join(',')}: ${r.verification.checks.filter((c) => !c.ok).map((c) => c.detail).join(' | ')}`);
+      // Never "passed" because one of the equivalent pictures happened to fit.
+      assert.equal(r.verification.videoTiming.status, repeatMs <= 250 ? 'unmeasurable' : 'passed', check(r, 'sync.video_timeline')?.detail);
+      assert.equal(r.verification.audioTiming.status, 'passed', check(r, 'sync.audio_timing')?.detail);
+    });
+  }
+
+  const five = periodic('60000/1001', 12); // 200 ms
+  test('periodic pictures with a timing error that no repeat explains -> VERIFY_ERROR (33 ms bug, +300 ms)', async () => {
+    const src = makeSample(path.join(work, 'm2-fault.mp4'), five);
+    const weave = "setfield=tff,separatefields,select='not(mod(n\\,4))+eq(mod(n\\,4)\\,3)',weave=first_field=top";
+    const bug33: FrameRatePolicy = { name: 'phase2-33ms', decide: (c) => ({ ...INTERLACED_POLICY.decide(c), filter: `fps=60000/1001,${weave},fps=30000/1001,setfield=tff` }) };
+    await assert.rejects(convert({ ...base(), input: src, frameRatePolicy: bug33 }), verifyError(/sync\.video_timeline/, /picture off by at least 3\d(\.\d)? ms/));
+    await assert.rejects(convert({ ...base(), input: src, frameRatePolicy: pictureShift(0.3, SECONDS) }), verifyError(/sync\.video_timeline/, /picture off by at least (9\d|10\d)(\.\d)? ms/));
+  });
+
+  test('periodic pictures shifted by exactly two repeats cannot be told from correct: ambiguous, not passed', async () => {
+    const r = await convert({ ...base(), input: makeSample(path.join(work, 'm2-fault.mp4'), five), frameRatePolicy: pictureShift(0.4004, SECONDS) });
+    assert.equal(r.verification.videoTiming.status, 'unmeasurable', check(r, 'sync.video_timeline')?.detail);
+  });
+
+  test('periodic pictures + sound 400 ms late -> VERIFY_ERROR from the sound', async () => {
+    const tc = faultToolchain(toolchain!, path.join(work, 'fault-m2-audio'), AUDIO_SHIFT(400, SECONDS));
+    await assert.rejects(convert({ ...base(), toolchain: tc, input: makeSample(path.join(work, 'm2-fault.mp4'), five) }), verifyError(/sync\.audio_timing/));
+  });
+
+  test('60i field order and temporal loss are still caught on periodic pictures with a long repeat (400 ms)', async () => {
+    const src = makeSample(path.join(work, 'm2-400.mp4'), periodic('60000/1001', 24));
+    const swapped: FrameRatePolicy = { name: 'field-order', decide: (c) => ({ ...INTERLACED_POLICY.decide(c), filter: `${FILTER_INTERLACE_60I},il=ls=1:cs=1` }) };
+    await assert.rejects(convert({ ...base(), input: src, frameRatePolicy: swapped }), verifyError(/video\.field_temporal/));
+    const loss: FrameRatePolicy = { name: 'loss', decide: (c) => ({ ...INTERLACED_POLICY.decide(c), filter: 'fps=30000/1001:start_time=0' }) };
+    await assert.rejects(convert({ ...base(), input: src, frameRatePolicy: loss }), verifyError(/video\.field_temporal/));
   });
 });

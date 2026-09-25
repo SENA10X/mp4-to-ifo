@@ -263,3 +263,28 @@ test('BH-H1: structure floor: flat pictures, near-black noise and grain are not 
   assert.notEqual(normalise(line((x, y) => (x > 28 && x < 36 && y > 22 && y < 26 ? 235 : 16)), 0), null, 'a small title on black');
   assert.equal(MIN_STRUCTURE, 1);
 });
+
+test('M-2: a picture that repeats within the search has no time of its own, only candidates', () => {
+  const fps = 60000 / 1001;
+  const seeds = Array.from({ length: 120 }, (_, i) => (i % 12) + 1); // the same 12 pictures every 200 ms
+  const src = Object.assign(seeds.map((seed, i) => {
+    const px = unit(seed, 0.004, 1000 + i);
+    return { t: i / fps, duration: 1 / fps, first: 'top' as const, top: px, bottom: px };
+  }), { seeds });
+  const nearest = (c: { out: number; src: number[] }) => Math.min(...c.src.map((s) => Math.abs(c.out - s)));
+  const onTime = analyseFields(src, fieldsShowing(src, 110, (j) => j), 0.2, 1.8, cap60i);
+  assert.deepEqual(onTime.changes, [], 'no precise change point from a repeating picture');
+  assert.equal(judgeFields(onTime.stats, cap60i).status, 'unmeasurable');
+  assert.ok(onTime.ambiguous.length > 50, `${onTime.ambiguous.length} entries`);
+  assert.ok(onTime.ambiguous.every((c) => c.src.length > 1 && nearest(c) < 1e-6));
+  // Two fields late: no repeat explains it.
+  const late = analyseFields(src, fieldsShowing(src, 110, (j) => Math.max(0, j - 2)), 0.2, 1.8, cap60i);
+  assert.ok(late.ambiguous.length > 50 && late.ambiguous.every((c) => Math.abs(nearest(c) - 2 * FIELD) < 1e-6));
+  // A picture that comes back only after the search (400 ms) is still unique.
+  const slow = Object.assign(Array.from({ length: 120 }, (_, i) => {
+    const px = unit((i % 24) + 1, 0.004, 1000 + i);
+    return { t: i / fps, duration: 1 / fps, first: 'top' as const, top: px, bottom: px };
+  }), { seeds: Array.from({ length: 120 }, (_, i) => (i % 24) + 1) });
+  const unique = analyseFields(slow, fieldsShowing(slow, 110, (j) => j), 0.2, 1.8, cap60i);
+  assert.ok(unique.changes.length > 50 && unique.ambiguous.length === 0);
+});

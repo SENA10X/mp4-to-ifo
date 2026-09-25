@@ -14,7 +14,7 @@
 import { isCancelled } from '../errors.ts';
 import { runTool, type RunResult } from '../process.ts';
 import type { Toolchain } from '../toolchain.ts';
-import { WIDE_SEARCH_SEC, type ChangePoint } from './fields.ts';
+import { WIDE_SEARCH_SEC, type AmbiguousChangePoint, type ChangePoint } from './fields.ts';
 
 const AUDIO_RATE = 8000;
 const WINDOW_SEC = 1.2;
@@ -43,6 +43,13 @@ export interface SyncMeasurement {
   audioWindowOffsetsMs: number[];
   /** Picture offset minus sound offset once the strategy's own timing is removed; positive = picture late. */
   introducedOffsetMs: number | null;
+  /**
+   * Pictures that repeat within the search (M-2), when the picture timing is not measurable otherwise:
+   * the smallest error any repeat of the picture allows (median over the changes, ms). Above the
+   * tolerance no reading of the output is on time; within it the time is ambiguous, not measured.
+   */
+  videoAmbiguousMs: number | null;
+  videoAmbiguousMatches: number;
 }
 
 export interface SyncInput {
@@ -53,6 +60,8 @@ export interface SyncInput {
   output: { input: string; origin: number; videoStart: number };
   /** Picture change points from the field comparison (fields.ts), on the same windows. */
   changes: ChangePoint[];
+  /** Changes into pictures that repeat within the search, with every candidate source time. */
+  ambiguous: AmbiguousChangePoint[];
   /** Where a correct conversion first shows a source moment (see expectedDisplayTime). */
   expectedDisplayTime: (sourceTime: number) => number;
   signal?: AbortSignal;
@@ -163,6 +172,8 @@ export async function measureSync(input: SyncInput): Promise<SyncMeasurement> {
   const timeline = median(pairs.map((p) => p.out - output.videoStart - input.expectedDisplayTime(p.src)));
   const au = median(audioOffsets);
   const videoOk = pairs.length >= MIN_CHANGE_POINTS;
+  const nearest = input.ambiguous.map((c) => Math.min(...c.src.map((src) => Math.abs(c.out - output.videoStart - input.expectedDisplayTime(src)))));
+  const ambiguousOk = !videoOk && nearest.length >= MIN_CHANGE_POINTS;
   const audioOk = audioOffsets.length >= Math.min(2, windows.length);
   const ms = (x: number | null) => (x === null ? null : Math.round(x * 10000) / 10);
   return {
@@ -176,5 +187,7 @@ export async function measureSync(input: SyncInput): Promise<SyncMeasurement> {
     audioTimingErrorMs: audioOk && au !== null ? ms(au - output.videoStart) : null,
     audioWindowOffsetsMs: audioOffsets.map((x) => ms(x) ?? 0),
     introducedOffsetMs: videoOk && audioOk && timeline !== null && au !== null ? ms(timeline + output.videoStart - au) : null,
+    videoAmbiguousMs: ambiguousOk ? ms(median(nearest)) : null,
+    videoAmbiguousMatches: nearest.length,
   };
 }
