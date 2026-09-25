@@ -34,6 +34,7 @@ npm run release:mac（apps/desktop/scripts/release-mac.sh）
 
 - 失敗したら止まる（テスト、監査、署名、公証の不受理、staple、最終検証のどれでも）。公証が不受理なら Notary log を保存して止まる。
 - `MP4_TO_IFO_TEST_BUILD=1`: ad-hoc 署名・公証なしで同じ手順を通す（パイプラインとアプリの確認用）。`release.json` は `testBuild: true`、「not for distribution」。`--level release` の検証は通らない。
+- `MP4_TO_IFO_SIGN_ONLY=1`: 署名とその検査のあとで止め、署名済み（公証前）の app を `apps/desktop/build/release-work/` に残す。公証の前に §6-1 の確認をするため。
 - 配布用（test build でない）は、作業ツリーに未コミットの変更があると始めない。`release.json` に commit を記録する。
 - 再検証: `npm run verify:release`（`check-bundle.mjs --level release --dmg … --metadata …`）。
 

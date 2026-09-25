@@ -14,6 +14,8 @@
 #   MP4_TO_IFO_NOTARY_PROFILE    notarytool keychain profile (default: mp4-to-ifo-notary)
 #   MP4_TO_IFO_TEST_BUILD=1      test build: ad-hoc signature, no notarization; everything else is the same.
 #                                The result says "not for distribution" and fails release verification.
+#   MP4_TO_IFO_SIGN_ONLY=1       stop after signing and its checks, keeping the signed (not notarized) app in
+#                                apps/desktop/build/release-work/ for testing before notarization.
 # Output: apps/desktop/build/release/
 #   MP4-to-IFO-<version>-arm64.dmg, release.json, SHA256SUMS, notary-*.json,
 #   MP4-to-IFO-<version>-third-party-sources.tar.gz (corresponding source of the bundled toolchain)
@@ -95,6 +97,10 @@ sign "$APP/Contents/MacOS/node" "$BUNDLE_ID.node" "$DESKTOP/src-tauri/node.entit
 # The bundle last: this signs the main executable and seals Resources. No entitlements.
 sign "$APP" "$BUNDLE_ID"
 node "$DESKTOP/scripts/check-bundle.mjs" --app "$APP" --level signed
+if [ "${MP4_TO_IFO_SIGN_ONLY:-0}" = 1 ]; then
+  echo "signed, not notarized: ${APP#"$REPO/"} (test it, then run the release again)"
+  exit 0
+fi
 
 notarize() { # file label
   local result="$OUT/notary-$2.json"
