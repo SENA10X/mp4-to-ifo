@@ -149,10 +149,6 @@ export function classifyHdr(stream: ProbeStream): HdrInfo {
   return { kind: 'sdr', dolbyVision: null };
 }
 
-/**
- * Variable frame rate: r_frame_rate and avg_frame_rate disagree, or packet durations spread.
- * CFR streams in coarse time bases alternate by one tick (e.g. 512/513), well under 5%.
- */
 export type Scan = 'progressive' | 'tff' | 'bff' | 'unknown';
 
 /**
@@ -169,6 +165,10 @@ export function scanOf(frames: { interlaced: boolean; topFirst: boolean }[], fie
   return fieldOrder === 'progressive' ? 'progressive' : fieldOrder === 'tt' ? 'tff' : fieldOrder === 'bb' ? 'bff' : 'unknown';
 }
 
+/**
+ * Variable frame rate: r_frame_rate and avg_frame_rate disagree, or packet durations spread.
+ * CFR streams in coarse time bases alternate by one tick (e.g. 512/513), well under 5%.
+ */
 export function detectVariableFrameRate(r: Rational, avg: Rational, packetPts: number[]): boolean {
   const rv = rationalValue(r);
   const av = rationalValue(avg);
