@@ -202,11 +202,36 @@ Tauri 2 の方式（`tauri-plugin-updater` / `@tauri-apps/plugin-updater`）:
 
 Standard CI が緑でも、17 サンプルの regression が通ったことにはならない（workflow 名と冒頭のコメントに明記）。
 
-## 13. Phase 6 の結果（2026-09-24）
+## 13. Phase 6 の結果
 
-**Status: PARTIAL.** このマシンに Developer ID Application の証明書がない（keychain にあるのは Apple Development と Apple Distribution だけ）。Developer ID での署名、公証、staple、Gatekeeper の受理、quarantine 付きでの起動は未実施。ad-hoc 署名を代わりに合格とはしていない。
+### 13.1 Developer ID release（2026-09-25、commit `c4eb286`）
 
-Developer ID なしで確認できたこと（`MP4_TO_IFO_TEST_BUILD=1 npm run release:mac`、ad-hoc 署名 + Hardened Runtime）:
+**Status: PASS**（通知は未確認。§6-5 は自動で確認できなかった）。
+
+| 項目 | 結果 |
+| --- | --- |
+| Artifact | `MP4-to-IFO-0.1.0-arm64.dmg`、60,102,647 bytes、SHA-256 `5fea8d915467118791796ee91d1ddf01f57c6232736d4cf777c3eced77a36034` |
+| Sources | `MP4-to-IFO-0.1.0-third-party-sources.tar.gz`、SHA-256 `ade95e595271009a767311ebd90ab68a68dd6c0a0c667cb8efbfce895a8fdba6` |
+| Signing | 5 つの Mach-O とアプリ: Developer ID Application（Team 56DKFD4G33）、Hardened Runtime、secure timestamp、Developer ID の designated requirement。entitlements は node の `allow-jit` だけ、`get-task-allow` なし |
+| Signed .app（公証前、`MP4_TO_IFO_SIGN_ONLY=1`） | LaunchServices で起動 → MP4 を選択 → Plan → 出力フォルダを変更 → 変換 → 検証合格 → 出力フォルダを開く。Gatekeeper は `Unnotarized Developer ID`（公証前として想定どおり） |
+| 公証 app | submission `4bff9965-477d-4dbf-98ad-dd731dc58fa2`: Accepted（約 75 分、この Team で初回）。log の issues なし、ticket は app と 5 つの Mach-O（arm64） |
+| 公証 DMG | submission `fc604ccc-1269-4185-a2dc-f86754fd480b`: Accepted。log の issues なし |
+| Staple | app と DMG、`stapler validate` 成功 |
+| 最終検証 | `check-bundle --level release --dmg --metadata` と `npm run verify:release`: すべて ok |
+| Gatekeeper | DMG（`-t open`）と app（`-t exec`）: accepted、`source=Notarized Developer ID` |
+| Quarantine | DMG に Safari と同じ quarantine → マウント → /Applications にコピー（quarantine 引き継ぎ）→ 取り出し → 起動: 「インターネットからダウンロードされたアプリケーションです…Appleによるチェックで悪質なソフトウェアは検出されませんでした」→「開く」→ 起動（quarantine は承認済み `02c3` に） |
+| Installed app | 変換 → 検証合格 → 出力フォルダを開く、開けないときの表示、キャンセル、変換中の Cmd+Q →「キャンセルして終了」（子プロセス・caffeinate・出力・作業フォルダなし）、Settings、Open Source Licenses（8 ファイル = 同梱） |
+| Toolchain / Sleep | 変換中のアプリの子孫は同梱の node、ffmpeg（ffprobe、dvdauthor）と `caffeinate -i -w` だけ。終了後にアサーションなし |
+| ネットワークなし | IP と DNS を拒否した sandbox で /Applications のアプリを起動し、変換・検証が完了 |
+| 17 samples | `npm run test:regression`: 17/17 pass（開発用の LGPL ツールで。Core は Phase 6 で変更なし） |
+| 通知 | **未確認。** Developer ID 署名・/Applications のアプリでも、バックグラウンドでの完了後に Notification Center への登録が見られない。画面収録の権限がなく表示も確認できない（署名なしでも同じ。§13.2） |
+
+- /Applications へのコピーは `ditto`（Finder の操作は自動化できない）。そのため macOS の App Translocation（読み取り専用のランダムなパスから起動）がかかったが、変換・検証・出力フォルダ・後片付けはそのまま動いた。Finder でドラッグしてインストールすれば Translocation はかからない。
+- Developer ID Application 証明書の有効期限は 2027-02-01（G1 の中間 CA）。公証・timestamp 済みの配布物はその後も有効。以降のリリースには新しい証明書が必要。
+
+### 13.2 Developer ID の前（2026-09-24、TEST BUILD）
+
+Developer ID の証明書がなかった時点の確認（PARTIAL）。ad-hoc 署名を合格の代わりにはしていない。確認できたこと（`MP4_TO_IFO_TEST_BUILD=1 npm run release:mac`、ad-hoc 署名 + Hardened Runtime）:
 
 | 項目 | 結果 |
 | --- | --- |
@@ -225,5 +250,3 @@ Developer ID なしで確認できたこと（`MP4_TO_IFO_TEST_BUILD=1 npm run r
 | Settings | 「このビルドでは、アップデートの確認は利用できません。」 |
 | 通知 | **未確認。** 画面収録の権限がなく、Notification Center の表示を確認できなかった。署名なしの同じビルドでも Notification Center への登録が見られず、署名とは関係のない既存の問題の可能性がある（通知は非推奨の NSUserNotification を使う `mac-notification-sys` 経由）。音は指定していない |
 | Size | .app 155 MiB（`du`。node 112.3 MB、ffmpeg 21.1 MB、ffprobe 21.0 MB、app 6.2 MB、dvdauthor 0.2 MB）、DMG 60,095,808 bytes（test build） |
-
-Developer ID Application が用意できたら: §2 の keychain profile を作り、コミット済みのツリーで `npm run release:mac` → §6 の 1〜6 を Developer ID の DMG で行う → 17 サンプルの regression（`npm run test:regression`）を 1 回。
