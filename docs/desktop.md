@@ -1,7 +1,8 @@
-# MP4 to IFO — Phase 5 macOS Desktop App
+# MP4 to IFO — Desktop (macOS)
 
 `apps/desktop`（`@mp4-to-ifo/desktop`、private）。Tauri 2 + React + TypeScript の macOS アプリ。
-Apple Silicon、macOS 14 以降のみ。変換は Phase 3 Core がすべて行い、アプリは表示と操作だけを受け持つ。
+Apple Silicon、macOS 14 以降のみ。変換は Core（docs/core.md）がすべて行い、アプリは表示と操作だけを受け持つ。
+§1–4、§6–7 が現在の仕様。§5 は開発時の確認記録。
 
 **Not physically verified.** 完了画面の「検証に合格」はソフトウェア検証の結果で、DVD プレーヤーでの再生互換性は主張しない。
 
@@ -25,7 +26,7 @@ apps/desktop/
 │   ├── screens.tsx          各画面（表示のみ）
 │   ├── bridge.ts            Bridge インターフェースと Tauri 実装
 │   ├── messages.ts          Engine のエラー・警告 → 文言キー
-│   ├── config.ts            Burn guide / Report issue の URL（未公開のため null）、Updater の有無
+│   ├── config.ts            Burn guide / Report issue の URL（現在どちらも null。ボタンは出ない）、Updater の有無（現在 false）
 │   ├── i18n/                en.ts / ja.ts / index.ts
 │   └── styles.css
 ├── engine/engine.ts         Core を呼ぶ小さなエントリ（analyze / convert）
@@ -101,7 +102,7 @@ UI ──(input, outputDirectory, planDigest)──▶ Rust start_conversion ─
 - ffmpeg は `-version` で configure を表示するため `--prefix=/usr/local`（中立）でビルドする。ビルドした Mac のパス（ユーザー名）が入っていないことをスクリプトと `check-bundle.mjs` が確認する。
 - サイズ: ffmpeg 21 MB、ffprobe 21 MB、dvdauthor 190 KB、node 113 MB。.app 全体で約 155 MB。
 - 実際のバージョン、ソースの SHA-256、configure、バイナリの SHA-256、リンク先は `third-party/build-info/toolchain.txt`（アプリにも同梱）。
-- ライセンス文は `third-party/licenses/`、一覧と再配布の注意は `third-party/README.md`。アプリの MIT とは別に扱う。
+- ライセンス文は `third-party/licenses/`、同梱物の正式な一覧と再配布の注意は `third-party/README.md`。アプリの MIT とは別に扱う。
 
 ### Toolchain isolation の確認
 
@@ -164,6 +165,8 @@ engine "done" (Core が検証後に確定した outputDir)
 ---
 
 ## 5. 実 .app での確認（Phase 5）
+
+> **Historical validation record.** この節は Phase 5 / 5.1 / 5.2 の開発中に、署名なしのローカルビルドで行った確認の記録で、現在の Release の検証結果ではない。署名・公証した配布物の確認と v0.1.0 の記録は docs/release.md §13。
 
 `npm run app` でビルドし、LaunchServices（`open`、Finder のダブルクリックと同じ経路）で起動。操作は macOS のアクセシビリティ API（System Events）でボタンを押し、ファイル選択パネルにパスを入れた。Terminal や Homebrew は変換に関与しない（engine は PATH から Homebrew を除いた環境で同梱ツールを使う）。
 

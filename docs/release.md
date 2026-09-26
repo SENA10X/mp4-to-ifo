@@ -1,7 +1,7 @@
-# MP4 to IFO — Phase 6 macOS Release Engineering
+# MP4 to IFO — Release (macOS)
 
 Mac アプリ（Apple Silicon、macOS 14 Sonoma 以降）を、第三者に配布できる署名・公証済みの DMG にする手順と、その確認。
-変換ロジック（Core）は Phase 6 で変更していない。
+§1–12 が現在のリリース手順。§13 はリリースの記録（公開前の確認と、公開した v0.1.0）。
 
 **Not physically verified.** 検証はソフトウェアによるもので、DVD プレーヤーでの再生互換性は主張しない。
 
@@ -108,14 +108,14 @@ codesign --force --sign <Developer ID> --options runtime --timestamp --identifie
 | なし | 止まる（CPU 100% のまま 20 秒で打ち切り） | — |
 | なし + `node --jitless` | 動く（JIT が原因であることの確認） | — |
 | `allow-unsigned-executable-memory` のみ | 動く | 採用しない（`allow-jit` より広い: 署名のない実行可能メモリを全面的に許す） |
-| **`allow-jit` のみ** | **動く** | **Complete、48 checks、10 フェーズすべて、Cancel も正常（exit 4、出力なし、子プロセスなし）** |
+| **`allow-jit` のみ** | **動く** | **Complete、48 checks（Phase 6 当時の項目数）、10 フェーズすべて、Cancel も正常（exit 4、出力なし、子プロセスなし）** |
 | `allow-jit` + `allow-unsigned-executable-memory` | 動く | 不要（`allow-jit` だけで足りる） |
 
 実測は ad-hoc 署名 + Hardened Runtime で行った（Hardened Runtime の制約は署名者によらずカーネルが課す）。Developer ID での署名後にも同じ確認をする（§6）。
 
 ## 6. 確認（Signed app / Installed app）
 
-Phase 6 の実施結果は §13。
+実施結果は §13。
 
 1. **Signed .app（公証前）**: 署名済みの .app を LaunchServices（`open`、Finder のダブルクリックと同じ経路）で起動し、System Events（アクセシビリティ API）で操作: MP4 を選択 → Plan → 出力フォルダの変更 → 変換 → 検証 → Complete → 出力フォルダを開く（Finder の前面ウィンドウがその出力フォルダであること）。
 2. **Final DMG → /Applications**: DMG に quarantine（ダウンロードと同じ `com.apple.quarantine`）を付けてマウント → アプリを /Applications へコピー（quarantine が引き継がれる）→ 取り出し → /Applications から起動 → Gatekeeper → 変換 → 検証 → Complete → 出力フォルダを開く。
@@ -140,6 +140,8 @@ Version は `check-bundle.mjs` が core / cli / desktop の package.json、Cargo
 
 ## 9. Third-party compliance
 
+同梱物とライセンスの正式な一覧は `third-party/README.md`。ここにはリリースで確認することだけを書く。
+
 | | Version | License | 配布物での扱い |
 | --- | --- | --- | --- |
 | FFmpeg（ffmpeg, ffprobe） | 7.1 | LGPL-2.1-or-later | 別の実行ファイル。`--enable-gpl` / `--enable-nonfree` なし（`check-bundle` が `-version` と `-L` で確認） |
@@ -154,16 +156,20 @@ Version は `check-bundle.mjs` が core / cli / desktop の package.json、Cargo
 - GPL（dvdauthor）: 対応ソースをバイナリと同時に公開する（書面による申し出ではなく同梱公開）。
 - `third-party/sources.json`（machine-readable、ツールごとの version / license / source URL / source SHA-256 / binary SHA-256 / modifications / build）は `build-toolchain.sh` が作る。`third-party/inventory.json` と `licenses/Rust-crates-and-npm-packages.txt` は `license-inventory.mjs` が lockfile から作る（npm は desktop の production 依存、Rust は app バイナリの normal 依存で proc-macro・build 依存を除く）。
 - Open Source Licenses 画面は同梱の `licenses/` の全ファイルを表示する。`check-bundle` が `licenses/` = sources.json の licenseFiles + npm/Rust notices + THIRD-PARTY.md + アプリの MIT であること、各ファイルがリポジトリと同じであることを確認する。
-- アプリ自身のコードは MIT（`LICENSE`）。README、THIRD-PARTY.md、notices の冒頭で、同梱の第三者コンポーネントには MIT が及ばないことを明記。
+- `THIRD-PARTY.md` はリポジトリのファイルではない。実体は `third-party/README.md` で、アプリの `licenses/` とソース archive にはこの名前でコピーされる（`tauri.conf.json`、`release-mac.sh`）。
+- アプリ自身のコードは MIT（`LICENSE`）。README、`third-party/README.md`（アプリ内では THIRD-PARTY.md）、notices の冒頭で、同梱の第三者コンポーネントには MIT が及ばないことを明記。
 
-### Release に載せるもの（将来の GitHub Release）
+### GitHub Release の assets（v0.1.0 で公開）
 
 ```text
 MP4-to-IFO-<version>-arm64.dmg                         署名・公証・staple 済み
 MP4-to-IFO-<version>-third-party-sources.tar.gz        FFmpeg / zimg / dvdauthor の対応ソース、ビルドスクリプト、ビルド情報
 SHA256SUMS                                             上 2 つの SHA-256
+release.json                                           Release metadata（§8）
 Source code (zip / tar.gz)                             GitHub が tag から自動で付ける（アプリの MIT のソース）
 ```
+
+公証の結果とログ（`notary-*.json`）は `apps/desktop/build/release/` に残すだけで、Release には載せない。
 
 リリースノートには最小要件（Apple Silicon、macOS 14 以降）、Not physically verified、SHA-256 を書く。「すべての DVD プレーヤーで再生できる」「互換性を保証」「実機で確認済み」とは書かない。
 
@@ -178,7 +184,7 @@ Source code (zip / tar.gz)                             GitHub が tag から自�
 
 ## 11. Updater（準備のみ）
 
-Phase 6 では入れない。偽の endpoint・公開鍵は置かない。Settings の「アップデートを確認」は「このビルドでは利用できません」と表示する（`config.updatesEnabled: false`）。
+v0.1.0 には入れていない。偽の endpoint・公開鍵は置かない。Settings の「アップデートを確認」は「このビルドでは利用できません」と表示する（`config.updatesEnabled: false`）。
 
 Tauri 2 の方式（`tauri-plugin-updater` / `@tauri-apps/plugin-updater`）:
 
@@ -202,9 +208,11 @@ Tauri 2 の方式（`tauri-plugin-updater` / `@tauri-apps/plugin-updater`）:
 
 Standard CI が緑でも、17 サンプルの regression が通ったことにはならない（workflow 名と冒頭のコメントに明記）。
 
-## 13. Phase 6 の結果
+## 13. リリースの記録
 
-### 13.1 Developer ID release（2026-09-25、commit `c4eb286`）
+Historical record。13.1–13.4 は公開前の確認（Phase 6 と Beta Hardening）で、13.1・13.2 の成果物は公開していない。v0.1.0 Public Beta として公開したのは 13.4 で作った成果物で、公開の記録は 13.5。
+
+### 13.1 Developer ID release（2026-09-25、commit `c4eb286`、未公開）
 
 **Status: PASS**（通知は未確認。§6-5 は自動で確認できなかった）。
 
@@ -264,7 +272,7 @@ Phase 6 の DMG は公開に使わない（中の `third-party-sources.tar.gz` �
 
 ### 13.4 Beta Hardening Release Candidate（2026-09-26、commit `a67619b`）
 
-**Status: PASS**。Phase 6 の DMG は使っていない。Beta Hardening の変更（M-4、BH-H1、M-3、M-2、M-5、BH-H2）を含むクリーンな `a67619b` から `npm run release:mac` で作り直した。
+**Status: PASS**。Phase 6 の DMG は使っていない。Beta Hardening の変更（M-4、BH-H1、M-3、M-2、M-5、BH-H2）を含むクリーンな `a67619b` から `npm run release:mac` で作り直した。この成果物を v0.1.0 Public Beta として GitHub の pre-release で公開した。
 
 | 項目 | 結果 |
 | --- | --- |
@@ -282,3 +290,29 @@ Phase 6 の DMG は公開に使わない（中の `third-party-sources.tar.gz` �
 | 証明書 | Developer ID Application の有効期限は 2027-02-01。この成果物は timestamp・公証済みで期限後も有効。以降のリリースには新しい証明書が必要 |
 
 **Not physically verified.** Windows での Zip64 展開と、macOS 14 の実機は未確認。
+
+### 13.5 v0.1.0 Public Beta（公開の記録）
+
+| 項目 | 内容 |
+| --- | --- |
+| Version | 0.1.0（core / cli / desktop の package.json、`release.json`） |
+| 公開 | GitHub pre-release「MP4 to IFO v0.1.0 Beta」、2026-09-26T06:22:29Z |
+| Tag | `v0.1.0`（annotated、2026-09-26T03:17:53+09:00）→ `915c1e0` |
+| バイナリのソース | `a67619b`（`release.json` の `source.commit`、`clean: true`）。`a67619b..915c1e0` は docs/release.md の記録の追加だけ（documentation-only） |
+| 署名・公証 | Developer ID Application（Team 56DKFD4G33）、app と DMG を公証（Accepted）・staple、Gatekeeper accepted（`source=Notarized Developer ID`）。確認の詳細は 13.4 |
+| Heavy Media Regression | 17/17 PASS。根拠は `output/core-regression/results.json`（`test:regression` の出力、Git 管理外）で、17 サンプルすべて passed、各 49 項目で failed 0。ファイルの時刻は 2026-09-26 01:13–01:30 JST で、`65f99cf` のコミット（01:12）の後。`65f99cf..a67619b` は docs/core.md だけ。実行時の作業ツリーが clean だったかは記録していない |
+| Standard CI | `915c1e0`: success（run 36170980020）。`a67619b` だけの run はない（コードは同じ） |
+| Physical DVD | **NOT PHYSICALLY VERIFIED** |
+| npm | 未公開 |
+| 未確認 | macOS 14 の実機、Windows での Zip64 展開 |
+
+Assets:
+
+| File | Size | SHA-256 |
+| --- | --- | --- |
+| `MP4-to-IFO-0.1.0-arm64.dmg` | 60,109,536 B | `b36b72b236ec155b5d2f76609da620954a89d9e691a83b8bac4c08e5af1cc8fe` |
+| `MP4-to-IFO-0.1.0-third-party-sources.tar.gz` | 12,097,842 B | `036de1cf498c79162420f1d50a29f11f2013c2a049e728d5308ad37f01e51ff7` |
+| `SHA256SUMS` | 203 B | 上 2 つの SHA-256 |
+| `release.json` | 1,521 B | Release metadata（§8） |
+
+公証のログ（`notary-*.json`）は公開していない。

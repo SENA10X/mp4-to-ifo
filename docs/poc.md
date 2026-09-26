@@ -1,5 +1,14 @@
 # MP4 to IFO — Phase 2 PoC 結果（最終）
 
+> **Historical record.** この文書は Phase 2 時点の PoC・設計調査の記録で、当時の調査結果と設計判断を残すためのもの。現在の製品仕様ではない。現在の仕様は [docs/core.md](core.md)。本文は当時のまま残しており、次の点は現在の実装と異なる。
+>
+> - **HDR**: PoC では停止した（`UNSUPPORTED_INPUT`、§5）。現在は HDR10 / HLG を experimental として SDR に変換する（互換ベースレイヤーのない Dolby Vision などは unsupported）。
+> - **4ch 以上の音声**: PoC は ffmpeg の行列でダウンミックスした（§9.8）。現在は 5.1 以外のマルチチャンネルを変換しない（`UNSUPPORTED_AUDIO_LAYOUT`）。
+> - **ISO / ZIP**: PoC は mkisofs と Info-ZIP `zip` で作った（§3）。現在は Core の自前の Writer で作り、mkisofs / isoinfo はテストの Reference にだけ使う。
+> - **検証**: PoC の 39 項目（§6）は現在の検証を表さない。現在の検証は docs/core.md §7。
+> - **4 GB を超える ZIP**: PoC では未検証（§10、§11）。現在は macOS で確認済み（docs/release.md §13.3）。Windows での展開は未確認。
+> - §11 の未解決事項には、その後に対応したもの（A/V 同期の自動検証、VFR の開始時刻、LGPL 版 FFmpeg の同梱など）がある。現在の制限は docs/core.md §11。
+
 **Result:** Phase 2 **PASS**
 **Physical DVD:** **Not physically verified**
 **Script:** `scripts/poc-convert.mjs`（PoC専用。Phase 3 Coreではない）

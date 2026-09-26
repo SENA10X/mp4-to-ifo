@@ -1,7 +1,7 @@
-# MP4 to IFO — Phase 3 Production Core
+# MP4 to IFO — Core
 
 `packages/core`（`@mp4-to-ifo/core`、private）。GUI（Tauri）と CLI が共有する変換 Core。
-変換仕様の出典は `docs/poc.md`。PoC（`scripts/poc-convert.mjs`）は Reference として残している。
+§1–11 が現在の仕様。§12 以降は開発時の記録（History）。`docs/poc.md` と PoC（`scripts/poc-convert.mjs`）は Phase 2 の調査記録で、設計判断の背景として参照するだけ（現在の仕様ではない）。
 
 **Physical DVD playback compatibility has not been verified.**
 特に 59.94i、Hard Telecine、自前 ISO/UDF、DVD-R / DVD+R の違いは、Beta での実機確認の対象。
@@ -161,7 +161,7 @@ const result = await convert({
 - `inspectToolchain()`: バージョン、`configuration`、ライセンス（`lgpl` / `gpl` / `nonfree`）、必要な filter / encoder / muxer の欠落。
 - 必要な機能: filter `scale pad tpad fps setsar setfield separatefields select weave telecine format pan volume astats aresample anullsrc showinfo`、encoder `mpeg2video ac3`、muxer `dvd`。HDR（Experimental）はさらに `zscale tonemap`。
 - `GPL_ONLY_FILTERS` は FFmpeg 7.1 の `configure` から抽出した一覧。全戦略のフィルタがこれに含まれないことをテストしている。
-- テストと回帰は **LGPL 版 FFmpeg 7.1** で実行した（`scripts/experiments/build-ffmpeg-lgpl.sh`）。
+- テストは **LGPL 版 FFmpeg 7.1** を優先する（`MP4_TO_IFO_FFMPEG_DIR`、なければ `build/ffmpeg-lgpl`。どちらもなければ PATH）。Standard CI は `apps/desktop/scripts/build-toolchain.sh` で作った同梱ツールチェーン（Mac アプリと同じ ffmpeg / ffprobe / dvdauthor）を `MP4_TO_IFO_FFMPEG_DIR` と PATH に置く。ローカル用の `scripts/experiments/build-ffmpeg-lgpl.sh` の構成は次のとおり。
 
 ```text
 --prefix=…/build/ffmpeg-lgpl --disable-autodetect --disable-network --disable-doc --disable-ffplay
@@ -173,7 +173,20 @@ const result = await convert({
 
 ## 6. 変換仕様（Phase 2 からの変更点を含む）
 
-基本は `docs/poc.md` §7（MPEG-2 MP@ML 720×480 16:9 yuv420p、`-g 18 -bf 2 -maxrate 9000k -bufsize 1835008 -flags +ildct+ilme -top 1`、`-f dvd -muxrate 10080000 -packetsize 2048`、AC-3 256 kbps）。
+### 基本（`encode.ts`、`profile/video.ts`、`capacity.ts`、`author.ts`）
+
+| 項目 | 値 |
+| --- | --- |
+| 映像 | `mpeg2video`、720×480、`-aspect 16:9`（`setsar=32/27`）、`format=yuv420p`。2-pass（pass 1 `-an -f null`、pass 2 で音声と多重化） |
+| ビットレート | `-b:v` は容量から計算（最大 8000 kbps、下の「容量」）。`-maxrate 9000k -minrate 0 -bufsize 1835008` |
+| GOP・フィールド | `-g 18 -bf 2 -flags +ildct+ilme -top 1`（`progressive_sequence` = 0、top field first） |
+| フレームレート | 両パスとも `-fps_mode cfr -r 30000/1001`。戦略とフィルタは下の「フレームレート」 |
+| 色 | 出力は BT.601（`scale` の `out_color_matrix=bt601:out_range=tv:flags=lanczos`、`-color_primaries` / `-color_trc` / `-colorspace` は `smpte170m`） |
+| 音声 | `-c:a ac3 -b:a 256k -ar 48000 -ac 2`。音声なしは `anullsrc=r=48000:cl=stereo`（下の「音声」） |
+| 多重化 | `-f dvd -muxrate 10080000 -packetsize 2048`、`-map_metadata -1 -map_chapters -1` |
+| Authoring | dvdauthor（`VIDEO_FORMAT=NTSC`）。VMG の First Play `jump title 1;`、1 タイトル、`<video format="ntsc" aspect="16:9" widescreen="nopanscan"/>`、`<audio format="ac3" channels="2" samplerate="48khz"/>`、PGC の post `exit;`。メニュー・チャプターなし |
+
+これらの値を選んだ理由（比較・実測）は Phase 2 の記録 `docs/poc.md` §7、§9 にある。
 
 ### フレームレート（`profile/frame-rate.ts`）
 
@@ -436,8 +449,8 @@ npm run typecheck && npm run build
 3. 音声は、なし・モノラル・ステレオ・5.1 のみ（v1 仕様。PoC は他の構成も ffmpeg の行列で変換していた）。
 4. HDR は Experimental（v1 仕様、§6）。実素材での評価は未実施。
 5. 内容による検査は素材に依存する。静止画やほとんど動かない映像、構造のない絵（黒・一様な色・グレイン）では、映像のタイミングとフィールドの時間情報が `unmeasurable`。無音・持続音・探索範囲（±250 ms）より短い周期の音では、音声のタイミングが `unmeasurable`。両方が測れない素材では、タイミングは構造の検査（`vob.av_start`、長さ）だけで確認している。±250 ms〜±1 s のずれは広い探索で失敗にする（§7）が、±1 s を超えるずれは内容の検査では判定しない。
-6. **孤児プロセス**: 変換中のプロセスが `kill -9` 等で強制終了すると、子の ffmpeg は動き続ける（Phase 4 で実測。`SIGTERM` にもすぐには反応しなかった）。ロックと job フォルダは次回の実行で回収される（`cleanupStaleJobs()` / stale 判定、実測で確認）。子プロセスの監視などの根本対策は、プロセスの生存期間を管理する Desktop（Phase 5）で行う。
-7. 配布用の LGPL FFmpeg（zimg の静的リンク、署名、ソース提供）と dvdauthor の Sidecar 構成は Phase 5 以降。
+6. **孤児プロセス**: 変換中のプロセスが `kill -9` 等で強制終了すると、子の ffmpeg は動き続ける（Phase 4 で実測。`SIGTERM` にもすぐには反応しなかった）。ロックと job フォルダは次回の実行で回収される（`cleanupStaleJobs()` / stale 判定、実測で確認）。Mac アプリでは、engine を独自のプロセスグループで動かし、アプリの終了・クラッシュ時にも子プロセスを止める（docs/desktop.md §3）。engine 自体や CLI が kill -9 された場合は、この制約が残る。
+7. ツールの同梱は Mac アプリだけ（LGPL 版 FFmpeg + zimg、dvdauthor、Node.js。docs/desktop.md §2、署名・ソースの公開は docs/release.md と third-party/README.md）。CLI はツールを同梱せず、PATH から使う。
 8. **Zip64**: 4 GB を超える ZIP は Zip64 で書く。Phase 4 で `zip64: 'always'`（小さなデータで Zip64 のレコードを強制する）を追加し、自前リーダーと Info-ZIP `unzip -t` で読めることを確認した。Beta Hardening で 4 GB を超える実データ（容量上限に近い 80 分の出力と、エントリの位置が 4 GiB を超える ZIP）を、`unzip -t`・Python・`ditto`・Archive Utility で確認した（docs/release.md §13.3）。Windows での展開は未確認。
 9. 内容の検査は 5 か所（長さの 15〜90%、各 1.2 s、合計 6 s）の区間だけを見る。区間の間にある部分的な故障は見えない（実測: 20 s の動画で 4.0〜5.5 s だけの 60i の間引きは PASS）。区間の中の故障は、区間ごとの判定で検出する（Phase 5.2）。区間を増やす、長さに応じて変える、などの改善は未実施（全編の比較は、20 分以上の動画の検証時間に見合わないため行わない）。
 10. HDR（トーンマッピングあり）の入力では、元と出力の輝度が非線形に違うため、内容の対応付けが `unmeasurable` になり得る（実素材での評価は未実施）。
@@ -447,7 +460,11 @@ npm run typecheck && npm run build
 
 ---
 
-## 12. Phase 4 での Core の変更
+## History
+
+ここから下は開発時の変更と検証の記録（Historical record）。現在の仕様は §1–11。検証項目の数、処理時間などの数値は記録した時点のもので、現在の値ではない。
+
+### 12. Phase 4 での Core の変更
 
 CLI のために次を追加した（変換仕様は変えていない）。
 
@@ -458,9 +475,11 @@ CLI のために次を追加した（変換仕様は変えていない）。
 | HDR の `unknown`（既知の SDR 以外の伝達特性 → `UNSUPPORTED_HDR`） | v1 仕様「Unknown HDR → Unsupported」の実装 |
 | ZIP の `zip64: 'always'` | 4 GB のデータを作らずに Zip64 の構造をテストするため |
 
-## 13. Regression（PoC samples）
+### 13. Regression（PoC samples）
 
 `npm run test:regression`（LGPL 版 FFmpeg 7.1、`requireLgpl: true`）で Phase 2 の全サンプルを Core で変換した。結果は `output/core-regression/results.json`（Git 管理外）。下の表は Phase 5.2 の検証での結果（映像の長さ・音声の長さ・gain は Phase 3 の結果と同じ。PoC との比較は Phase 3 で行った）。
+
+**Historical snapshot（Phase 5.2）**: 「46/48」などは当時の検証項目数（48）での値で、現在の数ではない。現在の検証項目は §7（`iso.capacity` を加えて 49）。v0.1.0 の回帰の結果は docs/release.md §13.5。
 
 | Sample | 戦略 | 検証（passed / 全項目） | 映像 s（期待値） | 音声 s | 映像 / 音声 / A/V の差 ms | フィールド coverage / backward | gain dB | 処理時間 / うち検証 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -494,7 +513,7 @@ CLI のために次を追加した（変換仕様は変えていない）。
 
 ---
 
-## 14. Phase 5.1 での変更（Verification Hardening）
+### 14. Phase 5.1 での変更（Verification Hardening）
 
 第三者レビューで、壊れた出力を検証が合格させる 2 つの false positive（H1、H2）と、正常な出力を不合格にする 2 つの false negative（M1、M2）、Desktop から渡る plan を Core が信用しすぎる問題（M3）が見つかった。**変換の仕様（エンコード、59.94i、テレシネ、dvdauthor、ISO/UDF、ZIP、容量、音声、HDR）は変えていない。**変えたのは検証と境界だけ。
 
@@ -508,7 +527,7 @@ CLI のために次を追加した（変換仕様は変えていない）。
 
 加えて、`skipped` を `status`（`passed` / `failed` / `unmeasurable` / `not_applicable`）に置き換えた。出力に音声ストリームがない場合に、同期の計測が例外で止まらず `streams.audio` の失敗として報告するようにした。
 
-### 生成と検証で共有しているもの（Shared Logic Audit）
+#### 生成と検証で共有しているもの（Shared Logic Audit）
 
 | 共有しているもの | 使う検証 | 同じバグを共有した場合 | 対策・残るリスク |
 | --- | --- | --- | --- |
@@ -526,7 +545,7 @@ Phase 5.1 で独立させたもの: フィールドの時間情報（独自の�
 
 ---
 
-## 15. Phase 5.2 での変更（Verification Robustness & Path Hardening）
+### 15. Phase 5.2 での変更（Verification Robustness & Path Hardening）
 
 Phase 5.1 後の独立再レビューで、正常な低動作・重複フレームの素材を `sync.video_timeline` が誤って不合格にする問題（H3、High）、後続の sequence extension を検証していない問題（M5）、確認後に出力フォルダのリンクを付け替えられる問題（M6）が見つかった。**変換の仕様は変えていない**（encode、59.94i、テレシネ、音声、dvdauthor、ISO / ZIP Writer、容量、HDR）。
 
@@ -540,7 +559,7 @@ Phase 5.1 後の独立再レビューで、正常な低動作・重複フレー�
 - **Mutation check**（`scripts/mutation-check.mjs`）をリポジトリに入れた（Phase 5.1 では一時的なスクリプトだった）。H1〜H3、M1〜M3、M5〜M7 の修正を 1 つずつ無効にし、テストが失敗することを確認する。最初の実行で、「出力が瞬間にきれいに入った場合だけ変化点を使う」規則を守るテストがなかったことが分かり、追加した。
 - 故障注入は、生成の経路（frame-rate policy、最終エンコードの引数だけを書き換える ffmpeg のラッパー）か、出力のバイトの書き換えで行う。バイトを書き換えた場合に ZIP と ISO を作り直す（壊した項目以外を一致させる）ところだけ、Core の Writer を使う。
 
-### 生成と検証で共有しているもの（§14 からの変更）
+#### 生成と検証で共有しているもの（§14 からの変更）
 
 - 映像のタイミングは、フィールド検査と同じデコードと対応付けを使うようになった。フィールド検査（`video.field_temporal`）は引き続き `expectedDisplayTime` を使わない。`expectedDisplayTime`（生成側のモデル）を使うのは映像のタイミングだけ。
 - 映像のタイミングで生成側のモデルを使うのは「瞬間が始まる時刻の、最初の表示時刻」だけ。どのフレームが重複しているかは元の内容から検証側が決める。

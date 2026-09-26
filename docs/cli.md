@@ -1,6 +1,7 @@
-# MP4 to IFO — Phase 4 CLI
+# MP4 to IFO — CLI
 
-`packages/cli`（npm パッケージ名 `mp4-to-ifo`、コマンド `mp4-to-ifo`）。Phase 3 Core の薄い利用者で、変換・計算・検証のロジックは持たない。
+`packages/cli`（npm パッケージ名 `mp4-to-ifo`、コマンド `mp4-to-ifo`）。Core の薄い利用者で、変換・計算・検証のロジックは持たない。
+この文書はリポジトリの開発者向け。利用者向けの概要は README、npm パッケージの README（未公開）は `packages/cli/README.md`。
 
 ```text
 arguments → Core API → terminal output → exit code
@@ -83,15 +84,15 @@ mp4-to-ifo <input.mp4> [options]
 - 1 回目の SIGINT / SIGTERM → `AbortController.abort()`。後片付け（子プロセスの停止、作業フォルダ・staging の削除、ロックの解放、スリープ抑止の解除）は Core が行う → exit 4。
 - 2 回目 → 後片付け中であることを表示。3 回目 → その場で終了（一時ファイルが残る場合があり、次回の実行で回収される）。
 - ターミナルでの Ctrl+C（プロセスグループ全体への SIGINT。ffmpeg も直接受け取る）でも exit 4 になり、後片付けが完了することをテストした。
-- `kill -9` のように CLI がシグナルを受け取れない終了では、子の ffmpeg が残る（`docs/core.md` §11、Phase 5 の課題）。
+- `kill -9` のように CLI がシグナルを受け取れない終了では、子の ffmpeg が残る（`docs/core.md` §11）。
 
 ## 7. npm パッケージ
 
-- `bin: { "mp4-to-ifo": "dist/main.js" }`、`files: dist, README.md, LICENSE`、`engines.node >= 22.18`、`license: MIT`、repository / homepage / bugs は予定の URL（リポジトリは未作成）。
+- `bin: { "mp4-to-ifo": "dist/main.js" }`、`files: dist, README.md, LICENSE`、`engines.node >= 22.18`、`license: MIT`。repository / bugs は公開リポジトリ（https://github.com/SENA10X/mp4-to-ifo）。homepage の GitHub Pages の URL は、現在ページがない（404）。
 - Core は非公開のワークスペースパッケージのため、`bundleDependencies` で同梱する。npm はワークスペースのシンボリックリンクを同梱しないので、`prepack` で Core と CLI をビルドし、Core の `dist` と実行時用の `package.json` を `packages/cli/node_modules/@mp4-to-ifo/core` に実体としてコピーする。`postpack` で削除する。
 - tarball: 63 ファイル、約 97 kB（展開後 約 228 kB）。src / test / scripts / ソースマップは含まない。
 - `test/integration/pack.test.ts`: `npm pack` → 空のプロジェクトにオフラインでインストール → `npx --no-install mp4-to-ifo --version / --help / sample.mp4 --yes` で変換まで確認する。
-- **npm publish はしていない。** ffmpeg / ffprobe / dvdauthor は同梱しない（PATH から解決）。バイナリの配布は Desktop / Distribution の Phase で扱う。
+- **npm publish はしていない。** v0.1.0 の GitHub Release（pre-release）は Mac アプリだけで、CLI はリポジトリから実行する。ffmpeg / ffprobe / dvdauthor は同梱しない（PATH から解決）。ツールを同梱するのは Mac アプリだけ（docs/desktop.md §2）。
 
 ## 8. Privacy
 

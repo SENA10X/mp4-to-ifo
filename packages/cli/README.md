@@ -2,7 +2,7 @@
 
 Convert an MP4 video into DVD-Video files for disc authoring: a `VIDEO_TS` folder (IFO / BUP / VOB), a `VIDEO_TS.zip`, and a DVD-Video ISO. Everything runs locally, and every output is verified before it is kept.
 
-**Status:** pre-release (0.x). Not published to npm yet. The output has not been tested on physical DVD players; test the burned disc on a DVD player before relying on it.
+**Status:** Public Beta (v0.1.0), not published to npm. The output has not been tested on physical DVD players; test the burned disc on a DVD player before relying on it.
 
 ## Requirements
 
