@@ -6,7 +6,7 @@ It is made for the common request "please bring your movie as a DVD / IFO file":
 
 ## Status
 
-Pre-release (0.x). The conversion core, the command-line tool and the Mac app work. No release has been published yet: the Mac app's signed and notarized release build is prepared ([docs/release.md](docs/release.md)) but not distributed, and nothing is published to npm.
+Public Beta (v0.1.0). The conversion core, the command-line tool and the Mac app work. The Mac app is distributed as a signed and notarized DMG from the [v0.1.0 GitHub pre-release](https://github.com/SENA10X/mp4-to-ifo/releases/tag/v0.1.0). Nothing is published to npm.
 
 **Not physically verified.** The output passes software verification (DVD structure, streams, full decode, picture and sound timing against the source, sampled checks that the motion reaches the interlaced fields, ZIP and ISO checks), but it has not been tested on physical DVD players. Always test the burned disc on a DVD player before submitting it. Checks that a particular video gives nothing to measure (a still picture, silence) are reported as not measured, not as passed.
 
